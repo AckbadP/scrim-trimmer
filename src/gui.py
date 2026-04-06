@@ -839,7 +839,11 @@ class App(TkinterDnD.Tk):
         ttk.Button(btn_frame, text="Close", command=win.destroy).pack(side=tk.RIGHT)
 
         win.update_idletasks()
-        win.geometry(f"{win.winfo_reqwidth() + 20}x{win.winfo_reqheight()}")
+        w = win.winfo_reqwidth() + 20
+        h = win.winfo_reqheight()
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        win.geometry(f"{w}x{h}+{x}+{y}")
 
     def _md_inline(self, widget, text, base_tag=None):
         """Insert text with inline `code` and **bold** formatting applied."""
