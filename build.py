@@ -149,7 +149,7 @@ def main():
     check_system_deps()
 
     pip("pyinstaller", "pyinstaller-hooks-contrib")
-    pip("opencv-python", "Pillow", "numpy", "pytesseract", "tkinterdnd2")
+    pip("opencv-python", "Pillow", "numpy", "pytesseract", "tkinterdnd2", "psutil")
 
     sep = os.pathsep  # ':' on Linux, ';' on Windows
 
@@ -170,6 +170,7 @@ def main():
         "--hidden-import", "PIL._tkinter_finder",
         "--hidden-import", "pytesseract",
         "--hidden-import", "numpy",
+        "--hidden-import", "psutil",
         "--hidden-import", "config",
         "--hidden-import", "native_dialogs",
         "--hidden-import", "frame_extractor",
