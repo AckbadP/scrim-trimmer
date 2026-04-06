@@ -222,6 +222,7 @@ def run(args) -> None:
                     args.video,
                     chat_region=tuple(args.chat_region),
                     verbose=args.verbose,
+                    progress_callback=getattr(args, 'progress_callback', None),
                 )
             except (RuntimeError, ValueError) as e:
                 print(f"Error: {e}", file=sys.stderr)

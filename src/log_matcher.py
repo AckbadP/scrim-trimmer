@@ -23,6 +23,8 @@ Strategy
 """
 
 import re
+import sys
+import time
 from typing import Dict, List, Optional
 
 import cv2
@@ -88,6 +90,7 @@ def detect_t0(
     chat_region: tuple = (0.0, 0.35, 0.15, 1.0),
     sample_interval: int = 30,
     verbose: bool = False,
+    progress_callback=None,
 ) -> int:
     """
     Auto-detect t0 (EVE game seconds-since-midnight UTC at video second 0).
@@ -128,8 +131,12 @@ def detect_t0(
     best_per_msg: Dict[str, int] = {}
     frames_sampled = 0
 
+    sample_seconds = list(range(0, duration, sample_interval))
+    total_samples = len(sample_seconds)
+    start_time = time.monotonic()
+
     cap = cv2.VideoCapture(video_path)
-    for video_sec in range(0, duration, sample_interval):
+    for sample_num, video_sec in enumerate(sample_seconds, start=1):
         frame_number = int(video_sec * fps)
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
         ret, frame = cap.read()
@@ -153,6 +160,25 @@ def detect_t0(
                 # Keep only the highest candidate for this message (first appearance).
                 if norm_msg not in best_per_msg or t0_candidate > best_per_msg[norm_msg]:
                     best_per_msg[norm_msg] = t0_candidate
+
+        if not verbose:
+            elapsed = time.monotonic() - start_time
+            pct = sample_num / total_samples
+            if progress_callback is not None:
+                progress_callback(sample_num, total_samples)
+            else:
+                filled = int(30 * pct)
+                bar = "#" * filled + "-" * (30 - filled)
+                eta_str = ""
+                if sample_num > 1 and elapsed > 0:
+                    remaining = (total_samples - sample_num) * elapsed / sample_num
+                    m, s = divmod(int(remaining), 60)
+                    eta_str = f"  ETA {m}:{s:02d}"
+                sys.stdout.write(f"\r  [{bar}] {pct*100:5.1f}%  {sample_num}/{total_samples}{eta_str}  ")
+                sys.stdout.flush()
+
+    if not verbose and progress_callback is None:
+        sys.stdout.write("\n")
 
     cap.release()
 

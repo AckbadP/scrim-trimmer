@@ -323,6 +323,11 @@ class App(TkinterDnD.Tk):
                                       relief=tk.SUNKEN, padding=(4, 2))
         self.status_label.pack(fill=tk.X, pady=(4, 0))
 
+        # --- Progress bar (hidden until t0 detection runs) ---
+        self.progress_bar = ttk.Progressbar(main_frame, mode='determinate', maximum=100)
+        self.progress_bar.pack(fill=tk.X, pady=(2, 0))
+        self.progress_bar.pack_forget()
+
         # --- Run button (bottom) ---
         run_frame = ttk.Frame(main_frame)
         run_frame.pack(fill=tk.X, pady=(8, 4))
@@ -635,6 +640,12 @@ class App(TkinterDnD.Tk):
         self.run_btn.configure(state="disabled")
         self._set_status("Running...")
 
+        def _on_progress(current, total):
+            pct = int(current / total * 100) if total > 0 else 0
+            self.after(0, lambda p=pct: self._update_progress(p))
+
+        args.progress_callback = _on_progress
+
         def worker():
             try:
                 chapters_text = pipeline.run(args)
@@ -652,6 +663,7 @@ class App(TkinterDnD.Tk):
                 self.after(0, lambda: self._set_status(f"Error: {msg}"))
             finally:
                 self.after(0, lambda: self.run_btn.configure(state="normal"))
+                self.after(0, self.progress_bar.pack_forget)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -871,6 +883,10 @@ class App(TkinterDnD.Tk):
         if not candidates:
             return None
         return min(candidates, key=lambda p: abs(os.path.getmtime(p) - video_mtime))
+
+    def _update_progress(self, pct: int):
+        self.progress_bar.pack(fill=tk.X, pady=(2, 0))
+        self.progress_bar.configure(value=pct)
 
     def _set_status(self, msg: str):
         self.status_label.configure(text=msg)
