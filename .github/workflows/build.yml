@@ -12,7 +12,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
-            artifact: eve-at-trimmer
+            artifact: eve-at-trimmer-x86_64.AppImage
             artifact_name: eve-at-trimmer-linux
           - os: windows-latest
             artifact: eve-at-trimmer.exe
@@ -64,3 +64,24 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/eve-at-trimmer-linux/eve-at-trimmer-x86_64.AppImage
+            artifacts/eve-at-trimmer-windows/eve-at-trimmer.exe
+            artifacts/eve-at-trimmer-macos/eve-at-trimmer
