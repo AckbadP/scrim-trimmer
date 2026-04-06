@@ -64,6 +64,7 @@ class App(TkinterDnD.Tk):
         self.video_path: str | None = None
         self._thumb_ref = None  # prevent GC of PhotoImage
         self._thumb_pil: Image.Image | None = None  # source image for re-rendering on resize
+        self._cancel_event = threading.Event()
 
         # Canvas state
         self._canvas_img_id = None
@@ -336,13 +337,18 @@ class App(TkinterDnD.Tk):
             font=("TkDefaultFont", 9, "bold"))
         self.progress_canvas.bind("<Configure>", lambda e: self._redraw_progress())
 
-        # --- Run button (bottom) ---
+        # --- Run / Cancel buttons (bottom) ---
         run_frame = ttk.Frame(main_frame)
         run_frame.pack(fill=tk.X, pady=(8, 4))
+        run_frame.columnconfigure(0, weight=1)
 
-        self.run_btn = ttk.Button(run_frame, text="Run", command=self._run, width=20,
+        self.run_btn = ttk.Button(run_frame, text="Run", command=self._run,
                                   padding=(0, 8))
-        self.run_btn.pack(fill=tk.X, padx=6)
+        self.run_btn.grid(row=0, column=0, sticky=tk.EW, padx=(6, 3))
+
+        self.cancel_btn = ttk.Button(run_frame, text="Cancel", command=self._cancel,
+                                     padding=(0, 8), state="disabled", width=10)
+        self.cancel_btn.grid(row=0, column=1, padx=(3, 6))
 
     # ------------------------------------------------------------------
     # File acquisition
@@ -645,7 +651,9 @@ class App(TkinterDnD.Tk):
             chapters_dir=chapters_dir,
         )
 
+        self._cancel_event.clear()
         self.run_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="normal")
         self._set_status("Running...")
 
         def _on_progress(current, total):
@@ -657,6 +665,7 @@ class App(TkinterDnD.Tk):
 
         args.progress_callback = _on_progress
         args.status_callback = _on_status
+        args.cancel_event = self._cancel_event
 
         def worker():
             try:
@@ -667,6 +676,8 @@ class App(TkinterDnD.Tk):
                     self.after(0, lambda t=chapters_text: self._show_chapters(t))
                 if self.close_on_complete_var.get():
                     self.after(0, self.destroy)
+            except pipeline.CancelledError:
+                self.after(0, lambda: self._set_status("Cancelled"))
             except SystemExit as e:
                 code = e.code
                 self.after(0, lambda: self._set_status(f"Stopped (exit {code})"))
@@ -675,9 +686,15 @@ class App(TkinterDnD.Tk):
                 self.after(0, lambda: self._set_status(f"Error: {msg}"))
             finally:
                 self.after(0, lambda: self.run_btn.configure(state="normal"))
+                self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
                 self.after(0, lambda: self._finish_progress())
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _cancel(self):
+        self._cancel_event.set()
+        self.cancel_btn.configure(state="disabled")
+        self._set_status("Cancelling...")
 
     # ------------------------------------------------------------------
     # Reset

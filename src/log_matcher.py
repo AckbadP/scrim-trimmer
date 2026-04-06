@@ -91,6 +91,7 @@ def detect_t0(
     sample_interval: int = 30,
     verbose: bool = False,
     progress_callback=None,
+    cancel_event=None,
 ) -> int:
     """
     Auto-detect t0 (EVE game seconds-since-midnight UTC at video second 0).
@@ -137,6 +138,9 @@ def detect_t0(
 
     cap = cv2.VideoCapture(video_path)
     for sample_num, video_sec in enumerate(sample_seconds, start=1):
+        if cancel_event is not None and cancel_event.is_set():
+            cap.release()
+            raise RuntimeError("__cancelled__")
         frame_number = int(video_sec * fps)
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
         ret, frame = cap.read()

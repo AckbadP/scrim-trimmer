@@ -27,6 +27,16 @@ import video_clipper
 from video_clipper import create_clips, stitch_clips
 
 
+class CancelledError(Exception):
+    """Raised when the user cancels the pipeline."""
+
+
+def _check_cancel(args):
+    cancel_event = getattr(args, 'cancel_event', None)
+    if cancel_event and cancel_event.is_set():
+        raise CancelledError("Cancelled by user")
+
+
 def _check_dependencies(args) -> None:
     """Verify required external tools are available before starting a long job."""
     if not getattr(args, "force_python_clipper", False) and shutil.which("ffmpeg") is None:
@@ -220,6 +230,7 @@ def run(args) -> None:
                 sys.exit(1)
             t0_source = f"t0={args.t0} (provided)"
         else:
+            _check_cancel(args)
             _notify("Auto-detecting t0 from chat log(s)...")
             print(f"\n[0/4] Auto-detecting t0 from chat log(s) "
                   f"(sampling 1 frame per 30 s)...")
@@ -230,8 +241,14 @@ def run(args) -> None:
                     chat_region=tuple(args.chat_region),
                     verbose=args.verbose,
                     progress_callback=getattr(args, 'progress_callback', None),
+                    cancel_event=getattr(args, 'cancel_event', None),
                 )
-            except (RuntimeError, ValueError) as e:
+            except RuntimeError as e:
+                if str(e) == "__cancelled__":
+                    raise CancelledError("Cancelled by user")
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
+            except ValueError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 sys.exit(1)
             hh = t0_sec // 3600
@@ -265,11 +282,13 @@ def run(args) -> None:
             print("\nNo CD→WF pairs found. Nothing to clip.", file=sys.stderr)
             sys.exit(0)
 
+        _check_cancel(args)
         _notify(f"Extracting {len(pairs)} clip(s)...")
         print(f"\n[2/4] Extracting {len(pairs)} clip(s)...")
         clip_paths = create_clips(args.video, pairs, output_dir)
 
         final_output = os.path.join(output_dir, "final_output.mp4")
+        _check_cancel(args)
         _notify("Stitching clips...")
         print(f"\n[3/4] Stitching clips into {final_output}...")
         stitch_clips(clip_paths, final_output)
@@ -311,6 +330,7 @@ def run(args) -> None:
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         for second, frame in extract_frames(args.video):
+            _check_cancel(args)
             region = crop_chat_region(frame, *args.chat_region)
             del frame
             if sem is None:
@@ -331,6 +351,8 @@ def run(args) -> None:
 
     rate = len(frame_texts) / elapsed if elapsed > 0 else 0
     print(f"  Done. {len(frame_texts)} frames in {_fmt_duration(elapsed)} ({rate:.1f} fps)")
+
+    _check_cancel(args)
 
     # Step 3: Detect CD/WF and pair them
     _notify("Analyzing chat for CD/WF commands...")
@@ -357,11 +379,13 @@ def run(args) -> None:
         sys.exit(0)
 
     # Step 4: Extract clips
+    _check_cancel(args)
     _notify(f"Extracting {len(pairs)} clip(s)...")
     print(f"\n[3/4] Extracting {len(pairs)} clip(s)...")
     clip_paths = create_clips(args.video, pairs, output_dir)
 
     # Step 5: Stitch clips
+    _check_cancel(args)
     final_output = os.path.join(output_dir, "final_output.mp4")
     _notify("Stitching clips...")
     print(f"\n[4/4] Stitching clips into {final_output}...")
