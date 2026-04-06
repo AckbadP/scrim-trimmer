@@ -1,11 +1,7 @@
 """
-Tests for ocr_processor.py — crop_chat_region and preprocess_for_ocr.
-
-run_ocr is not tested here because it requires the Tesseract binary or a GPU.
-Dispatch logic is tested via mocking.
+Tests for ocr_processor.py — crop_chat_region, preprocess_for_ocr, and run_ocr.
 """
 
-import importlib
 import os
 import sys
 import unittest.mock as mock
@@ -15,6 +11,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import ocr_processor
 from ocr_processor import crop_chat_region, preprocess_for_ocr
 
 
@@ -100,91 +97,25 @@ class TestPreprocessForOcr:
 
 
 # ---------------------------------------------------------------------------
-# run_ocr dispatch logic
+# run_ocr — Tesseract path
 # ---------------------------------------------------------------------------
 
-class TestRunOcrDispatching:
-    """Tests for run_ocr's GPU vs Tesseract dispatch — uses mocks, no real OCR."""
+class TestRunOcr:
+    """Tests for run_ocr — uses mocks, no real Tesseract binary needed."""
 
     def _make_frame(self):
         return np.zeros((100, 100, 3), dtype=np.uint8)
 
-    def test_uses_tesseract_when_reader_is_none(self):
-        import ocr_processor
+    def test_calls_tesseract(self):
         frame = self._make_frame()
-        with mock.patch.object(ocr_processor, '_easyocr_reader', None), \
-             mock.patch('ocr_processor.pytesseract.image_to_string', return_value='tesseract text') as mock_tess:
+        with mock.patch('ocr_processor.pytesseract.image_to_string', return_value='hello') as mock_tess:
             result = ocr_processor.run_ocr(frame)
-        assert result == 'tesseract text'
+        assert result == 'hello'
         mock_tess.assert_called_once()
 
-    def test_uses_gpu_when_reader_is_set(self):
-        import ocr_processor
-        frame = self._make_frame()
-        bbox = [[0, 0], [10, 0], [10, 10], [0, 10]]
-        mock_reader = mock.Mock()
-        mock_reader.readtext.return_value = [(bbox, 'gpu text', 0.99)]
-        with mock.patch.object(ocr_processor, '_easyocr_reader', mock_reader), \
-             mock.patch('ocr_processor.pytesseract.image_to_string') as mock_tess:
-            result = ocr_processor.run_ocr(frame)
-        assert result == 'gpu text'
-        mock_tess.assert_not_called()
-
-    def test_gpu_joins_multiline_results(self):
-        import ocr_processor
-        frame = self._make_frame()
-        bbox_top = [[0, 5], [10, 5], [10, 15], [0, 15]]
-        bbox_bottom = [[0, 20], [10, 20], [10, 30], [0, 30]]
-        mock_reader = mock.Mock()
-        mock_reader.readtext.return_value = [
-            (bbox_top, 'line one', 0.99),
-            (bbox_bottom, 'line two', 0.98),
-        ]
-        with mock.patch.object(ocr_processor, '_easyocr_reader', mock_reader):
-            result = ocr_processor.run_ocr(frame)
-        assert result == 'line one\nline two'
-
-    def test_gpu_sorts_by_y_coordinate(self):
-        import ocr_processor
-        frame = self._make_frame()
-        # Return results in reverse y-order (bottom first)
-        bbox_higher_y = [[0, 50], [10, 50], [10, 60], [0, 60]]
-        bbox_lower_y = [[0, 5], [10, 5], [10, 15], [0, 15]]
-        mock_reader = mock.Mock()
-        mock_reader.readtext.return_value = [
-            (bbox_higher_y, 'second line', 0.98),
-            (bbox_lower_y, 'first line', 0.99),
-        ]
-        with mock.patch.object(ocr_processor, '_easyocr_reader', mock_reader):
-            result = ocr_processor.run_ocr(frame)
-        assert result == 'first line\nsecond line'
-
-
-# ---------------------------------------------------------------------------
-# Module-level init (GPU detection)
-# ---------------------------------------------------------------------------
-
-class TestModuleInit:
-    """Tests for the _easyocr_reader initialization at import time."""
-
-    def _reload_ocr_processor(self):
-        """Reload ocr_processor with current sys.modules state."""
-        sys.modules.pop('ocr_processor', None)
-        import ocr_processor as m
-        return m
-
-    def test_reader_is_none_when_easyocr_not_installed(self):
-        fake_modules = {'easyocr': None, 'torch': None}
-        with mock.patch.dict(sys.modules, fake_modules):
-            m = self._reload_ocr_processor()
-        assert m._easyocr_reader is None
-
-    def test_reader_is_none_when_no_gpu(self):
-        mock_torch = mock.Mock()
-        mock_torch.cuda.is_available.return_value = False
-        mock_easyocr = mock.Mock()
-        fake_modules = {'easyocr': mock_easyocr, 'torch': mock_torch}
-        with mock.patch.dict(sys.modules, fake_modules):
-            m = self._reload_ocr_processor()
-        assert m._easyocr_reader is None
-        mock_easyocr.Reader.assert_not_called()
+    def test_run_ocr_on_region_calls_tesseract(self):
+        region = np.zeros((50, 50, 3), dtype=np.uint8)
+        with mock.patch('ocr_processor.pytesseract.image_to_string', return_value='world') as mock_tess:
+            result = ocr_processor.run_ocr_on_region(region)
+        assert result == 'world'
+        mock_tess.assert_called_once()
