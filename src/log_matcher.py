@@ -120,7 +120,6 @@ def detect_t0(
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration = int(total_frames / fps)
-    cap.release()
 
     # Best (highest) t0 candidate seen so far for each unique message.
     # A message that is still on screen at sample frame V gives candidate
@@ -135,8 +134,6 @@ def detect_t0(
     sample_seconds = list(range(0, duration, sample_interval))
     total_samples = len(sample_seconds)
     start_time = time.monotonic()
-
-    cap = cv2.VideoCapture(video_path)
     for sample_num, video_sec in enumerate(sample_seconds, start=1):
         if cancel_event is not None and cancel_event.is_set():
             cap.release()

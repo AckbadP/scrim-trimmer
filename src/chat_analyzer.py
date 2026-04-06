@@ -480,7 +480,7 @@ def analyze_frames(
         elif not has_seen_timestamps:
             # ---- Monotonic fallback (no timestamps seen anywhere yet) ----
             cd_count = count_keyword_in_messages(fixed, "CD")
-            wf_count = count_keyword_in_messages(text, "WF") + count_keyword_in_messages(text, "GF")
+            wf_count = count_keyword_in_messages(fixed, "WF") + count_keyword_in_messages(fixed, "GF")
 
             if verbose and (cd_count > 0 or wf_count > 0):
                 print(f"  [{second}s] CD={cd_count} WF={wf_count}")

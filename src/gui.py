@@ -11,6 +11,7 @@ Launch:
 
 import argparse
 import os
+import re
 import sys
 import threading
 
@@ -724,7 +725,6 @@ class App(TkinterDnD.Tk):
     # ------------------------------------------------------------------
 
     def _show_help(self):
-        import re
         readme_path = _resource_path("../README.md")
         try:
             with open(readme_path, "r") as f:
@@ -864,7 +864,6 @@ class App(TkinterDnD.Tk):
 
     def _md_inline(self, widget, text, base_tag=None):
         """Insert text with inline `code` and **bold** formatting applied."""
-        import re
         for part in re.split(r"(`[^`]+`|\*\*[^*]+\*\*)", text):
             if part.startswith("`") and part.endswith("`"):
                 tags = ("inline_code", base_tag) if base_tag else ("inline_code",)

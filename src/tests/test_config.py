@@ -81,7 +81,7 @@ class TestDefaultLogDir:
             return self == steam_path
 
         with patch.object(cfg.sys, "platform", "linux"), \
-             patch("os.getlogin", return_value="testuser"), \
+             patch.dict("os.environ", {"USER": "testuser"}), \
              patch.object(Path, "is_dir", is_dir_side_effect):
             result = cfg.default_log_dir()
         assert result == str(steam_path)
@@ -98,7 +98,7 @@ class TestDefaultLogDir:
             return self == lutris_path
 
         with patch.object(cfg.sys, "platform", "linux"), \
-             patch("os.getlogin", return_value="testuser"), \
+             patch.dict("os.environ", {"USER": "testuser"}), \
              patch.object(Path, "is_dir", is_dir_side_effect):
             result = cfg.default_log_dir()
         assert result == str(lutris_path)
@@ -124,7 +124,7 @@ class TestDefaultLogDir:
             return 200.0 if p == lutris_path else 100.0
 
         with patch.object(cfg.sys, "platform", "linux"), \
-             patch("os.getlogin", return_value="testuser"), \
+             patch.dict("os.environ", {"USER": "testuser"}), \
              patch.object(Path, "is_dir", is_dir_side_effect), \
              patch.object(cfg, "_most_recent_file_mtime", side_effect=mtime_side_effect):
             result = cfg.default_log_dir()

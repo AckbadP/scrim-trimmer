@@ -37,6 +37,21 @@ def _check_cancel(args):
         raise CancelledError("Cancelled by user")
 
 
+def _warn_orphans(
+    cd_times: List[int],
+    wf_times: List[int],
+    pairs: List[Tuple[int, int]],
+) -> None:
+    paired_cds = {cd for cd, _ in pairs}
+    paired_wfs = {wf for _, wf in pairs}
+    orphan_cds = [t for t in cd_times if t not in paired_cds]
+    orphan_wfs = [t for t in wf_times if t not in paired_wfs]
+    if orphan_cds:
+        print(f"  Warning: {len(orphan_cds)} CD(s) had no matching WF and were skipped: {orphan_cds}", file=sys.stderr)
+    if orphan_wfs:
+        print(f"  Warning: {len(orphan_wfs)} WF(s) had no preceding CD and were skipped: {orphan_wfs}", file=sys.stderr)
+
+
 def _check_dependencies(args) -> None:
     """Verify required external tools are available before starting a long job."""
     if not getattr(args, "force_python_clipper", False) and shutil.which("ffmpeg") is None:
@@ -256,9 +271,6 @@ def run(args) -> None:
             ss = t0_sec % 60
             t0_source = f"t0={hh:02d}:{mm:02d}:{ss:02d} (auto-detected)"
 
-        output_dir = args.output
-        os.makedirs(output_dir, exist_ok=True)
-
         print(f"Chat log mode: {t0_source}  ({len(args.chat_logs)} log file(s))")
         _notify("Parsing chat log(s)...")
         print("\n[1/4] Parsing chat log(s)...")
@@ -269,14 +281,7 @@ def run(args) -> None:
         pairs = pair_cd_wf(cd_times, wf_times)
         print(f"  Paired {len(pairs)} clip(s): {pairs}")
 
-        paired_cds = {cd for cd, _ in pairs}
-        paired_wfs = {wf for _, wf in pairs}
-        orphan_cds = [t for t in cd_times if t not in paired_cds]
-        orphan_wfs = [t for t in wf_times if t not in paired_wfs]
-        if orphan_cds:
-            print(f"  Warning: {len(orphan_cds)} CD(s) skipped: {orphan_cds}", file=sys.stderr)
-        if orphan_wfs:
-            print(f"  Warning: {len(orphan_wfs)} WF(s) skipped: {orphan_wfs}", file=sys.stderr)
+        _warn_orphans(cd_times, wf_times, pairs)
 
         if not pairs:
             print("\nNo CD→WF pairs found. Nothing to clip.", file=sys.stderr)
@@ -364,15 +369,7 @@ def run(args) -> None:
     pairs = pair_cd_wf(cd_times, wf_times)
     print(f"  Paired {len(pairs)} clip(s): {pairs}")
 
-    # Warn about unpaired events so users know if something was missed
-    paired_cds = {cd for cd, _ in pairs}
-    paired_wfs = {wf for _, wf in pairs}
-    orphan_cds = [t for t in cd_times if t not in paired_cds]
-    orphan_wfs = [t for t in wf_times if t not in paired_wfs]
-    if orphan_cds:
-        print(f"  Warning: {len(orphan_cds)} CD(s) had no matching WF and were skipped: {orphan_cds}", file=sys.stderr)
-    if orphan_wfs:
-        print(f"  Warning: {len(orphan_wfs)} WF(s) had no preceding CD and were skipped: {orphan_wfs}", file=sys.stderr)
+    _warn_orphans(cd_times, wf_times, pairs)
 
     if not pairs:
         print("\nNo CD→WF pairs found. Nothing to clip.", file=sys.stderr)
