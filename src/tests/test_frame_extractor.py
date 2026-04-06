@@ -98,22 +98,18 @@ class TestExtractFrames:
         with patch("cv2.VideoCapture", return_value=cap):
             results = list(extract_frames("fake.mp4"))
         seconds = [s for s, _ in results]
-        assert seconds == [0, 1, 2, 3]   # int(3/1)+1 = 4 iterations
+        assert seconds == [0, 1, 2]   # 3 frames at 1 fps → seconds 0, 1, 2
 
-    def test_skips_frames_that_fail_to_read(self):
+    def test_stops_when_read_fails(self):
         import numpy as np
         fake_frame = np.zeros((10, 10, 3), dtype=np.uint8)
-        # duration_seconds = int(3/1)+1 = 4 → 4 reads attempted
+        # Sequential decoder: a failed read terminates iteration (stream ended/error)
         cap = _mock_cap(fps=1.0, total_frames=3)
         cap.read.side_effect = [
-            (False, None),
             (True, fake_frame),
-            (True, fake_frame),
-            (True, fake_frame),
+            (False, None),   # fails at second=1 → stop
         ]
         with patch("cv2.VideoCapture", return_value=cap):
             results = list(extract_frames("fake.mp4"))
-        # t=0 skipped (read failed); t=1, t=2, t=3 yielded
         seconds = [s for s, _ in results]
-        assert 0 not in seconds
-        assert 1 in seconds
+        assert seconds == [0]

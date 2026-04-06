@@ -725,7 +725,7 @@ class App(TkinterDnD.Tk):
 
     def _show_help(self):
         import re
-        readme_path = _resource_path("../`README.md")
+        readme_path = _resource_path("../README.md")
         try:
             with open(readme_path, "r") as f:
                 content = f.read()
