@@ -7,7 +7,29 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    runs-on: ubuntu-22.04
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y ffmpeg tesseract-ocr
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run unit tests
+        run: pytest src/tests/
+
   build:
+    needs: test
     strategy:
       matrix:
         include:
@@ -66,7 +88,7 @@ jobs:
           path: dist/${{ matrix.artifact }}
 
   release:
-    needs: build
+    needs: [test, build]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
