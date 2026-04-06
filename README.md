@@ -10,7 +10,7 @@ This app was partly vibe coded. While it works well enough, expect bugs. Be care
 
 1. **Frame extraction** — samples one frame per second from the input video via OpenCV
 2. **OCR** — runs pytesseract on the bottom-left chat region of each frame
-3. **Chat analysis** — detects new `CD`/`WF` occurrences using a monotonic-count strategy (robust to OCR noise and missed frames); only matches keywords that appear *after* the `>` separator to avoid false positives from player names
+3. **Chat analysis** — detects new `CD`/`WF`/`GF` occurrences using a monotonic-count strategy (robust to OCR noise and missed frames); only matches keywords that appear *after* the `>` separator to avoid false positives from player names
 4. **Pairing** — for each `WF`, finds the most recent preceding `CD` and records the `(CD_time, WF_time)` boundary
 5. **Clipping** — ffmpeg stream-copies each segment (no re-encode)
 6. **Stitching** — ffmpeg concatenates all clips into `final_output.mp4`
@@ -42,7 +42,7 @@ sudo apt-get install tesseract-ocr ffmpeg python3-tk
 
 ```bash
 git clone <repo>
-cd eve-at-practice-trimmer
+cd scrim-trimmer
 python -m venv env
 source env/bin/activate
 pip install -r requirements.txt
@@ -115,6 +115,11 @@ python src/main.py <video.mp4>
 | `--chat-region X1 Y1 X2 Y2` | `0.0 0.35 0.15 1.0` | Chat window region as fractions of frame dimensions (left, top, right, bottom) |
 | `--chat-log` | *(none)* | EVE chat log `.txt` to use instead of OCR (repeatable for multiple files) |
 | `--t0` | *(auto)* | EVE game time (UTC) at video second 0 — `HH:MM:SS`; required with `--chat-log` if it cannot be auto-detected |
+| `--threads N` | CPU count | Number of parallel OCR worker threads |
+| `--ram-cap-gb GB` | `10` | Maximum GB of decoded frames held in memory at once; reduce if the process is killed by the OS |
+| `--chapters-dir DIR` | *(output dir)* | Directory to write the YouTube chapter timestamps `.txt` file |
+| `--force-python-clipper` | off | Use the Python/OpenCV clipper instead of ffmpeg (slower, re-encodes, strips audio) |
+| `--force-ocr` | off | Run the OCR pipeline even when `--chat-log` is provided |
 | `--verbose`/`-v` | off | Print OCR text and detection info per frame |
 
 Examples:

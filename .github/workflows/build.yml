@@ -73,10 +73,19 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Create source archives
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          git archive --format=zip --prefix=scrim-trimmer-${TAG}/ HEAD -o scrim-trimmer-${TAG}.zip
+          git archive --format=tar.gz --prefix=scrim-trimmer-${TAG}/ HEAD -o scrim-trimmer-${TAG}.tar.gz
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -85,3 +94,5 @@ jobs:
             artifacts/eve-at-trimmer-linux/eve-at-trimmer-x86_64.AppImage
             artifacts/eve-at-trimmer-windows/eve-at-trimmer.exe
             artifacts/eve-at-trimmer-macos/eve-at-trimmer
+            scrim-trimmer-*.zip
+            scrim-trimmer-*.tar.gz
