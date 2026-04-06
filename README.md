@@ -1,9 +1,10 @@
-# EVE AT Practice Trimmer
+# Scrim Trimmer
 
-OCR-based video editing tool for EVE Online Alliance Tournament practice sessions. Automatically detects `CD` (countdown) and `WF` (warp fleet) commands typed in the local chat window, then clips each `CD → WF` segment and stitches them into a single highlights reel.
+Log and OCR-based video editing tool for EVE Online Alliance Tournament practice sessions. Automatically detects `CD`, `GF`, and `WF` commands typed in the local chat window, then clips each `CD → WF/GF` segment and stitches them into a single highlights reel. Works best if the local log file is available but also has a pure ORC mode.
 
 ## Warning
-This app was mostly vibe coded. While it works well enough, expect bugs. Be careful when using the tool, while I have tested it on my personal machine (Ubuntu) to my own satisfaction, it has not been otherwise tested. If you do encounter an error, please raise an issue on GitHub here.
+This app was partly vibe coded. While it works well enough, expect bugs. Be careful when using the tool, while I have tested it on my personal machine (Ubuntu) to my own satisfaction, it has not been otherwise tested. If you do encounter an error, please raise an issue on GitHub.
+
 
 ## How it works
 
@@ -18,7 +19,7 @@ This app was mostly vibe coded. While it works well enough, expect bugs. Be care
 
 ### Executable (recommended)
 
-Download the latest executable for your platform from the [Releases](../../releases/latest) page. No Python installation required.
+Download the latest executable for your platform from the [Releases]() page. No Python installation required.
 
 You still need to install **ffmpeg** and **tesseract** on your system:
 
