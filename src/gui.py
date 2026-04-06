@@ -318,15 +318,23 @@ class App(TkinterDnD.Tk):
         ttk.Button(btn_frame, text="Reset", command=self._reset, width=10).pack(side=tk.LEFT, padx=6)
         ttk.Button(btn_frame, text="Help", command=self._show_help, width=10).pack(side=tk.LEFT, padx=6)
 
-        # --- Status bar ---
-        self.status_label = ttk.Label(main_frame, text="Ready", anchor=tk.W,
-                                      relief=tk.SUNKEN, padding=(4, 2))
-        self.status_label.pack(fill=tk.X, pady=(4, 0))
-
-        # --- Progress bar (hidden until t0 detection runs) ---
-        self.progress_bar = ttk.Progressbar(main_frame, mode='determinate', maximum=100)
-        self.progress_bar.pack(fill=tk.X, pady=(2, 0))
-        self.progress_bar.pack_forget()
+        # --- Status / progress bar ---
+        style = ttk.Style()
+        _trough = style.lookup("TProgressbar", "troughcolor") or "#d9d9d9"
+        _fill = style.lookup("TProgressbar", "background") or "#4a90d9"
+        _fg = style.lookup("TLabel", "foreground") or "black"
+        self._progress_pct = 0
+        self._progress_msg = "Ready"
+        self._progress_running = False
+        self._progress_fg_idle = _fg
+        self.progress_canvas = tk.Canvas(main_frame, height=22, bd=1, relief=tk.SUNKEN,
+                                         highlightthickness=0, bg=_trough)
+        self.progress_canvas.pack(fill=tk.X, pady=(4, 0))
+        self._prog_fill = self.progress_canvas.create_rectangle(0, 0, 0, 22, fill=_fill, outline="")
+        self._prog_text = self.progress_canvas.create_text(
+            0, 11, text="Ready", fill=_fg, anchor="center",
+            font=("TkDefaultFont", 9, "bold"))
+        self.progress_canvas.bind("<Configure>", lambda e: self._redraw_progress())
 
         # --- Run button (bottom) ---
         run_frame = ttk.Frame(main_frame)
@@ -644,7 +652,11 @@ class App(TkinterDnD.Tk):
             pct = int(current / total * 100) if total > 0 else 0
             self.after(0, lambda p=pct: self._update_progress(p))
 
+        def _on_status(msg: str):
+            self.after(0, lambda m=msg: self._set_status(m))
+
         args.progress_callback = _on_progress
+        args.status_callback = _on_status
 
         def worker():
             try:
@@ -663,7 +675,7 @@ class App(TkinterDnD.Tk):
                 self.after(0, lambda: self._set_status(f"Error: {msg}"))
             finally:
                 self.after(0, lambda: self.run_btn.configure(state="normal"))
-                self.after(0, self.progress_bar.pack_forget)
+                self.after(0, lambda: self._finish_progress())
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -687,6 +699,7 @@ class App(TkinterDnD.Tk):
         self.verbose_var.set(False)
         self.preview_frame.pack_forget()
         self.run_btn.configure(state="disabled")
+        self._finish_progress()
         self._set_status("Ready")
 
     # ------------------------------------------------------------------
@@ -884,12 +897,28 @@ class App(TkinterDnD.Tk):
             return None
         return min(candidates, key=lambda p: abs(os.path.getmtime(p) - video_mtime))
 
+    def _redraw_progress(self):
+        w = self.progress_canvas.winfo_width()
+        h = self.progress_canvas.winfo_height()
+        fill_w = int(w * self._progress_pct / 100)
+        self.progress_canvas.coords(self._prog_fill, 0, 0, fill_w, h)
+        self.progress_canvas.coords(self._prog_text, w // 2, h // 2)
+        text_color = "white" if self._progress_running else self._progress_fg_idle
+        self.progress_canvas.itemconfigure(self._prog_text, text=self._progress_msg, fill=text_color)
+
     def _update_progress(self, pct: int):
-        self.progress_bar.pack(fill=tk.X, pady=(2, 0))
-        self.progress_bar.configure(value=pct)
+        self._progress_pct = pct
+        self._progress_running = True
+        self._redraw_progress()
+
+    def _finish_progress(self):
+        self._progress_pct = 0
+        self._progress_running = False
+        self._redraw_progress()
 
     def _set_status(self, msg: str):
-        self.status_label.configure(text=msg)
+        self._progress_msg = msg
+        self._redraw_progress()
 
     @staticmethod
     def _fmt_duration(seconds: float) -> str:

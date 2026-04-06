@@ -187,6 +187,12 @@ def run(args) -> None:
     video_clipper.set_force_python(getattr(args, "force_python_clipper", False))
     _check_dependencies(args)
 
+    _status_cb = getattr(args, 'status_callback', None)
+
+    def _notify(msg: str):
+        if _status_cb:
+            _status_cb(msg)
+
     args.video = os.path.expanduser(args.video)
     args.output = os.path.expanduser(args.output)
     if args.chapters_dir:
@@ -214,6 +220,7 @@ def run(args) -> None:
                 sys.exit(1)
             t0_source = f"t0={args.t0} (provided)"
         else:
+            _notify("Auto-detecting t0 from chat log(s)...")
             print(f"\n[0/4] Auto-detecting t0 from chat log(s) "
                   f"(sampling 1 frame per 30 s)...")
             try:
@@ -236,6 +243,7 @@ def run(args) -> None:
         os.makedirs(output_dir, exist_ok=True)
 
         print(f"Chat log mode: {t0_source}  ({len(args.chat_logs)} log file(s))")
+        _notify("Parsing chat log(s)...")
         print("\n[1/4] Parsing chat log(s)...")
         cd_times, wf_times = parse_chat_logs(args.chat_logs, t0_sec, duration)
         print(f"  Found {len(cd_times)} CD(s) at: {cd_times}")
@@ -257,10 +265,12 @@ def run(args) -> None:
             print("\nNo CD→WF pairs found. Nothing to clip.", file=sys.stderr)
             sys.exit(0)
 
+        _notify(f"Extracting {len(pairs)} clip(s)...")
         print(f"\n[2/4] Extracting {len(pairs)} clip(s)...")
         clip_paths = create_clips(args.video, pairs, output_dir)
 
         final_output = os.path.join(output_dir, "final_output.mp4")
+        _notify("Stitching clips...")
         print(f"\n[3/4] Stitching clips into {final_output}...")
         stitch_clips(clip_paths, final_output)
 
@@ -278,6 +288,7 @@ def run(args) -> None:
 
     # Step 1 & 2: Extract frames and run OCR
     workers = args.threads if (getattr(args, "threads", None) and args.threads > 0) else (os.cpu_count() or 4)
+    _notify(f"Extracting frames and running OCR ({duration} frames, {workers} threads)...")
     print(f"\n[1/4] Extracting frames and running OCR ({duration} frames, {workers} threads)...")
     start_time = time.monotonic()
 
@@ -322,6 +333,7 @@ def run(args) -> None:
     print(f"  Done. {len(frame_texts)} frames in {_fmt_duration(elapsed)} ({rate:.1f} fps)")
 
     # Step 3: Detect CD/WF and pair them
+    _notify("Analyzing chat for CD/WF commands...")
     print("\n[2/4] Analyzing chat for CD/WF commands...")
     cd_times, wf_times = analyze_frames(frame_texts, verbose=args.verbose)
     print(f"  Found {len(cd_times)} CD(s) at: {cd_times}")
@@ -345,11 +357,13 @@ def run(args) -> None:
         sys.exit(0)
 
     # Step 4: Extract clips
+    _notify(f"Extracting {len(pairs)} clip(s)...")
     print(f"\n[3/4] Extracting {len(pairs)} clip(s)...")
     clip_paths = create_clips(args.video, pairs, output_dir)
 
     # Step 5: Stitch clips
     final_output = os.path.join(output_dir, "final_output.mp4")
+    _notify("Stitching clips...")
     print(f"\n[4/4] Stitching clips into {final_output}...")
     stitch_clips(clip_paths, final_output)
 
