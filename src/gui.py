@@ -16,6 +16,17 @@ import threading
 
 import psutil
 
+# When frozen by PyInstaller, restore the original LD_LIBRARY_PATH so that
+# system binaries (tesseract, ffmpeg) load the system libstdc++ instead of
+# the older bundled copy. Bundled .so files (cv2, numpy, etc.) use RPATH and
+# don't need LD_LIBRARY_PATH to find their dependencies.
+if getattr(sys, "frozen", False):
+    _orig_ld = os.environ.get("LD_LIBRARY_PATH_ORIG")
+    if _orig_ld is not None:
+        os.environ["LD_LIBRARY_PATH"] = _orig_ld
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
+
 
 def _resource_path(relative_to_src: str) -> str:
     """Return absolute path to a bundled resource, works for dev and PyInstaller."""
