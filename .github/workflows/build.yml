@@ -1,0 +1,66 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: eve-at-trimmer
+            artifact_name: eve-at-trimmer-linux
+          - os: windows-latest
+            artifact: eve-at-trimmer.exe
+            artifact_name: eve-at-trimmer-windows
+          - os: macos-latest
+            artifact: eve-at-trimmer
+            artifact_name: eve-at-trimmer-macos
+
+    runs-on: ${{ matrix.os }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ffmpeg tesseract-ocr
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg tesseract
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+
+      - name: Install tesseract (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install tesseract --no-progress -y
+          echo "C:\Program Files\Tesseract-OCR" >> $env:GITHUB_PATH
+
+      - name: Verify tools (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          ffmpeg -version
+          tesseract --version
+
+      - name: Build
+        run: python build.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact }}

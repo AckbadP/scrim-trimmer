@@ -1,0 +1,26 @@
+*.mp4
+out/*
+*.png
+resources/*
+*.report
+*.coverage
+
+# Python
+env/
+venv/
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/

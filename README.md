@@ -1,0 +1,154 @@
+# EVE AT Practice Trimmer
+
+OCR-based video editing tool for EVE Online Alliance Tournament practice sessions. Automatically detects `CD` (countdown) and `WF` (warp fleet) commands typed in the local chat window, then clips each `CD → WF` segment and stitches them into a single highlights reel.
+
+## Warning
+This app was mostly vibe coded. While it works well enough, expect bugs. Be careful when using the tool, while I have tested it on my personal machine (Ubuntu) to my own satisfaction, it has not been otherwise tested. If you do encounter an error, please raise an issue on GitHub here.
+
+## How it works
+
+1. **Frame extraction** — samples one frame per second from the input video via OpenCV
+2. **OCR** — runs pytesseract on the bottom-left chat region of each frame
+3. **Chat analysis** — detects new `CD`/`WF` occurrences using a monotonic-count strategy (robust to OCR noise and missed frames); only matches keywords that appear *after* the `>` separator to avoid false positives from player names
+4. **Pairing** — for each `WF`, finds the most recent preceding `CD` and records the `(CD_time, WF_time)` boundary
+5. **Clipping** — ffmpeg stream-copies each segment (no re-encode)
+6. **Stitching** — ffmpeg concatenates all clips into `final_output.mp4`
+
+## Installation
+
+### Executable (recommended)
+
+Download the latest executable for your platform from the [Releases](../../releases/latest) page. No Python installation required.
+
+You still need to install **ffmpeg** and **tesseract** on your system:
+
+- **Ubuntu/Debian:** `sudo apt-get install ffmpeg tesseract-ocr`
+- **macOS:** `brew install ffmpeg tesseract`
+- **Windows:** install [ffmpeg](https://ffmpeg.org/download.html) and [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki), both added to PATH
+
+Then just run the executable.
+
+### From source
+
+<details>
+<summary>Build/run from source</summary>
+
+System packages (Ubuntu):
+
+```bash
+sudo apt-get install tesseract-ocr ffmpeg python3-tk
+```
+
+```bash
+git clone <repo>
+cd eve-at-practice-trimmer
+python -m venv env
+source env/bin/activate
+pip install -r requirements.txt
+```
+
+Then launch the GUI:
+
+```bash
+python src/gui.py
+```
+
+</details>
+
+## GUI
+
+Drag a `.mp4` or `.mkv` file onto the window (or click Browse), configure options, and click Run.
+
+### Default directories
+
+The **Defaults** section at the top of the window lets you configure four persistent directories:
+
+| Field | Behaviour |
+|---|---|
+| **Video directory** | On launch (and whenever this is set via Browse), the most recently modified `.mp4`/`.mkv` in the directory is auto-loaded. |
+| **Log directory** | When a video is loaded, the `.txt` file in this directory whose name contains `"Local"` and whose modification time is closest to the video's is auto-selected as the chat log. |
+| **Output directory** | Pre-fills the Output dir option each time a video is loaded. |
+| **Chapters file dir** | Directory where the YouTube chapter timestamps file is written after a successful run. If left blank, no file is written. |
+
+These settings are saved to `~/.config/eve-trimmer/config.json` and restored on next launch.
+
+### Chat region
+
+When a video is loaded, a thumbnail is shown. **Click and drag on the thumbnail to select the chat window region** — a green dashed rectangle marks the selected area. The region is saved automatically and restored on next launch.
+
+The thumbnail is resizable: drag the window edges to make it larger for more precise selection. The image maintains its original aspect ratio.
+
+### Options — Main tab
+
+| Field | Description |
+|---|---|
+| **Output dir** | Directory where clips and `final_output.mp4` are written. |
+| **Chat log** | One or more EVE chat log `.txt` files (semicolon-separated). When provided, OCR is skipped and the log is used for CD/WF detection instead. |
+
+### Options — Advanced tab
+
+| Field | Default | Description |
+|---|---|---|
+| **t0** | *(auto)* | EVE game time (UTC) at video second 0 — `HH:MM:SS`. Required when using a chat log if it cannot be auto-detected from the video filename. |
+| **Threads** | CPU count | Number of parallel threads used for frame extraction and OCR. The hint shows the number of logical cores available on this machine. |
+| **RAM cap (GB)** | 10 | Maximum gigabytes of decoded frames held in memory at once. Reduce if the process is killed by the OS. The hint shows total physical RAM available on this machine. |
+| **Verbose** | off | Print OCR text and detection info per frame to the console. |
+| **Force Python clipper** | off | Use the pure-Python ffmpeg wrapper instead of the native ffmpeg binary for clipping. Slower but useful for debugging. |
+| **Show timestamps popup** | on | After a successful run, open a popup window displaying YouTube chapter timestamps (see below). |
+| **Close when done** | off | Automatically close the application once processing completes. |
+
+### YouTube chapter timestamps
+
+After each successful run, the tool generates a list of YouTube chapter timestamps — one line per clip in `0:00 Match 1` format. If **Show timestamps popup** is enabled, a window opens showing the timestamps with a **Copy to Clipboard** button. If a **Chapters file dir** is configured, the timestamps are also written to a `.txt` file in that directory.
+
+## CLI Usage
+
+```bash
+python src/main.py <video.mp4>
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `video` | *(required)* | Path to input `.mp4` or `.mkv` file |
+| `--output`/`-o` | `out/` | Output directory for clips and final video |
+| `--chat-region X1 Y1 X2 Y2` | `0.0 0.35 0.15 1.0` | Chat window region as fractions of frame dimensions (left, top, right, bottom) |
+| `--chat-log` | *(none)* | EVE chat log `.txt` to use instead of OCR (repeatable for multiple files) |
+| `--t0` | *(auto)* | EVE game time (UTC) at video second 0 — `HH:MM:SS`; required with `--chat-log` if it cannot be auto-detected |
+| `--verbose`/`-v` | off | Print OCR text and detection info per frame |
+
+Examples:
+
+```bash
+# Save clips to a custom directory
+python src/main.py recording.mp4 --output clips/
+
+# Use a chat log file instead of OCR
+python src/main.py recording.mp4 --chat-log ~/EVE/logs/Chatlogs/Local_20240101.txt
+
+# Custom chat region (x1 y1 x2 y2 as fractions)
+python src/main.py recording.mp4 --chat-region 0.0 0.30 0.20 1.0
+
+# Debug OCR output
+python src/main.py recording.mp4 --verbose
+```
+
+## Output
+
+```
+out/
+  clip_001.mp4      # first CD→WF segment
+  clip_002.mp4      # second CD→WF segment
+  ...
+  final_output.mp4  # all clips concatenated
+```
+
+Unpaired events (a `CD` with no following `WF`, or a `WF` with no preceding `CD`) are reported as warnings but do not stop processing.
+
+## Tests
+
+```bash
+source env/bin/activate
+python -m pytest src/tests/ -v
+```
+
+Tests cover keyword matching, OCR-noise robustness, monotonic detection, and all pairing edge cases.

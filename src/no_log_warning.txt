@@ -1,0 +1,5 @@
+No chat log file has been provided.
+
+Without logs, the tool will use OCR to read the chat region from every frame of the video. This will be significantly slower and less accurate than using log files.
+
+Click OK to continue anyway, or Cancel to provide a log file first.
