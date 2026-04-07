@@ -2,7 +2,7 @@ numpy
 opencv-python
 pillow
 psutil
-pytesseract
+pytesseract==0.3.13
 tkinterdnd2
 
 # Optional: GPU-accelerated OCR (requires CUDA hardware)
