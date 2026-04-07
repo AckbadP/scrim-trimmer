@@ -54,7 +54,7 @@ def _warn_orphans(
 
 def _check_dependencies(args) -> None:
     """Verify required external tools are available before starting a long job."""
-    if not getattr(args, "force_python_clipper", False) and shutil.which("ffmpeg") is None:
+    if not getattr(args, "run_without_ffmpeg", False) and shutil.which("ffmpeg") is None:
         print("Error: 'ffmpeg' not found in PATH. Install ffmpeg and try again.", file=sys.stderr)
         sys.exit(1)
     if shutil.which("tesseract") is None:
@@ -123,9 +123,9 @@ def parse_args():
         help="Directory to save the YouTube chapters .txt file (default: same as output dir)",
     )
     parser.add_argument(
-        "--force-python-clipper",
+        "--run-without-ffmpeg",
         action="store_true",
-        dest="force_python_clipper",
+        dest="run_without_ffmpeg",
         help=(
             "Use the Python/OpenCV clipper instead of ffmpeg. "
             "Slower, re-encodes video, and strips audio. "
@@ -209,7 +209,7 @@ def _progress_bar(current: int, total: int, elapsed: float, width: int = 30) -> 
 
 def run(args) -> None:
     """Run the trimmer pipeline with a pre-built args namespace."""
-    video_clipper.set_force_python(getattr(args, "force_python_clipper", False))
+    video_clipper.set_force_python(getattr(args, "run_without_ffmpeg", False))
     _check_dependencies(args)
 
     _status_cb = getattr(args, 'status_callback', None)

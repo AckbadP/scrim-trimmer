@@ -173,7 +173,7 @@ class App(TkinterDnD.Tk):
         self.t0_var = tk.StringVar()
         self.chat_log_var = tk.StringVar()
         self.verbose_var = tk.BooleanVar(value=False)
-        self.force_python_var = tk.BooleanVar(value=False)
+        self.run_without_ffmpeg_var = tk.BooleanVar(value=False)
         self.force_ocr_var = tk.BooleanVar(value=False)
         _cpu = os.cpu_count() or 4
         self.threads_var = tk.IntVar(value=self._conf.get("threads") or _cpu)
@@ -270,12 +270,12 @@ class App(TkinterDnD.Tk):
         ttk.Label(adv_tab, text="verbose").grid(row=5, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.verbose_var).grid(row=5, column=1, sticky=tk.W, pady=2)
 
-        # force Python clipper
-        ttk.Label(adv_tab, text="Force Python clipper").grid(
+        # run without ffmpeg
+        ttk.Label(adv_tab, text="Run without ffmpeg").grid(
             row=6, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(
-            adv_tab, variable=self.force_python_var,
-            command=self._on_force_python_toggle,
+            adv_tab, variable=self.run_without_ffmpeg_var,
+            command=self._on_run_without_ffmpeg_toggle,
         ).grid(row=6, column=1, sticky=tk.W, pady=2)
 
         # force OCR pipeline
@@ -608,15 +608,15 @@ class App(TkinterDnD.Tk):
         "Continue with the Python clipper anyway?"
     )
 
-    def _on_force_python_toggle(self):
-        if self.force_python_var.get():
+    def _on_run_without_ffmpeg_toggle(self):
+        if self.run_without_ffmpeg_var.get():
             proceed = messagebox.askokcancel(
                 "Warning: Python clipper has limitations",
                 self._FFMPEG_WARNING,
                 icon="warning",
             )
             if not proceed:
-                self.force_python_var.set(False)
+                self.run_without_ffmpeg_var.set(False)
 
     def _run(self):
         if not self.video_path:
@@ -647,7 +647,7 @@ class App(TkinterDnD.Tk):
             t0=t0_raw,
             threads=self.threads_var.get(),
             ram_cap_gb=self.ram_cap_var.get(),
-            force_python_clipper=bool(self.force_python_var.get()),
+            run_without_ffmpeg=bool(self.run_without_ffmpeg_var.get()),
             force_ocr=bool(self.force_ocr_var.get()),
             chapters_dir=chapters_dir,
         )
