@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import threading
+import time
 
 import psutil
 
@@ -66,6 +67,9 @@ class App(TkinterDnD.Tk):
         self._thumb_ref = None  # prevent GC of PhotoImage
         self._thumb_pil: Image.Image | None = None  # source image for re-rendering on resize
         self._cancel_event = threading.Event()
+        self._timer_start: float | None = None
+        self._timer_frozen: float | None = None
+        self._timer_after_id = None
 
         # Canvas state
         self._canvas_img_id = None
@@ -350,6 +354,10 @@ class App(TkinterDnD.Tk):
         self.cancel_btn = ttk.Button(run_frame, text="Cancel", command=self._cancel,
                                      padding=(0, 8), state="disabled", width=10)
         self.cancel_btn.grid(row=0, column=1, padx=(3, 6))
+
+        self.timer_label = ttk.Label(run_frame, text="", width=7, anchor="e",
+                                     font=("TkFixedFont", 9))
+        self.timer_label.grid(row=0, column=2, padx=(0, 6))
 
     # ------------------------------------------------------------------
     # File acquisition
@@ -655,6 +663,8 @@ class App(TkinterDnD.Tk):
         self._cancel_event.clear()
         self.run_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
+        self.timer_label.configure(text="")
+        self._start_timer()
         self._set_status("Running...")
 
         def _on_progress(current, total):
@@ -689,6 +699,7 @@ class App(TkinterDnD.Tk):
                 self.after(0, lambda: self.run_btn.configure(state="normal"))
                 self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
                 self.after(0, lambda: self._finish_progress())
+                self.after(0, self._stop_timer)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -718,6 +729,10 @@ class App(TkinterDnD.Tk):
         self.preview_frame.pack_forget()
         self.run_btn.configure(state="disabled")
         self._finish_progress()
+        self._stop_timer()
+        self._timer_start = None
+        self._timer_frozen = None
+        self.timer_label.configure(text="")
         self._set_status("Ready")
 
     # ------------------------------------------------------------------
@@ -939,6 +954,43 @@ class App(TkinterDnD.Tk):
     def _set_status(self, msg: str):
         self._progress_msg = msg
         self._redraw_progress()
+
+    # ------------------------------------------------------------------
+    # Execution timer
+    # ------------------------------------------------------------------
+
+    def _start_timer(self):
+        if self._timer_after_id is not None:
+            self.after_cancel(self._timer_after_id)
+            self._timer_after_id = None
+        self._timer_start = time.monotonic()
+        self._timer_frozen = None
+        self._tick_timer()
+
+    def _stop_timer(self):
+        if self._timer_after_id is not None:
+            self.after_cancel(self._timer_after_id)
+            self._timer_after_id = None
+        if self._timer_start is not None:
+            self._timer_frozen = time.monotonic() - self._timer_start
+        self._render_timer()
+
+    def _tick_timer(self):
+        self._render_timer()
+        self._timer_after_id = self.after(500, self._tick_timer)
+
+    def _render_timer(self):
+        if self._timer_start is None:
+            return
+        elapsed = self._timer_frozen if self._timer_frozen is not None else (
+            time.monotonic() - self._timer_start)
+        m, s = divmod(int(elapsed), 60)
+        h, m = divmod(m, 60)
+        if h:
+            text = f"{h}:{m:02}:{s:02}"
+        else:
+            text = f"{m}:{s:02}"
+        self.timer_label.configure(text=text)
 
     @staticmethod
     def _fmt_duration(seconds: float) -> str:
