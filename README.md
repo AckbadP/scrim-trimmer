@@ -19,7 +19,7 @@ This app was partly vibe coded. While it works well enough, expect bugs. Be care
 
 ### Executable (recommended)
 
-Download the latest executable for your platform from the [Releases]() page. No Python installation required.
+Download the latest executable for your platform from the [Releases](https://github.com/AckbadP/scrim-trimmer/releases) page. No Python installation required.
 
 You still need to install **ffmpeg** and **tesseract** on your system:
 
