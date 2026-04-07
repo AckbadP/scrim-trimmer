@@ -6,8 +6,6 @@ import sys
 import os
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from chat_log_parser import read_chat_log, parse_chat_logs, game_time_to_seconds, _parse_log_line
 
 

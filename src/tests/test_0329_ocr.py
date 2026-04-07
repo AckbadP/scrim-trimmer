@@ -25,8 +25,6 @@ import pytest
 import pytesseract
 from concurrent.futures import ThreadPoolExecutor
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from ocr_processor import crop_chat_region, preprocess_for_ocr
 from chat_analyzer import analyze_frames, pair_cd_wf
 

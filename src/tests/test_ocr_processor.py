@@ -9,8 +9,6 @@ import unittest.mock as mock
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 import ocr_processor
 from ocr_processor import crop_chat_region, preprocess_for_ocr
 

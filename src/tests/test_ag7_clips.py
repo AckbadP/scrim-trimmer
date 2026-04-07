@@ -19,8 +19,6 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from frame_extractor import extract_frames
 from ocr_processor import run_ocr
 from chat_analyzer import analyze_frames, pair_cd_wf

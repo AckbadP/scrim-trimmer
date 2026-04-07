@@ -21,8 +21,6 @@ Case summaries (from test-cases.md):
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from chat_log_parser import parse_chat_logs
 from chat_analyzer import pair_cd_wf
 

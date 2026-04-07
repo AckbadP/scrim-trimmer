@@ -12,8 +12,6 @@ from unittest.mock import MagicMock, patch
 import cv2
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from frame_extractor import extract_frames, get_video_duration
 
 
