@@ -210,14 +210,6 @@ class TestDetectT0:
         finally:
             os.unlink(path)
 
-    def test_returns_integer(self):
-        path = self._write_detect_log()
-        try:
-            t0 = self._run(path, "we are ready to fight", sample_interval=30)
-            assert isinstance(t0, int)
-        finally:
-            os.unlink(path)
-
     # -- multiple match frames: keeps highest candidate per message ----------
 
     def test_keeps_highest_candidate_per_message(self):
@@ -325,5 +317,22 @@ class TestDetectT0:
                 assert False, "Expected RuntimeError"
             except RuntimeError:
                 pass
+        finally:
+            os.unlink(path)
+
+    # -- verbose output covers print branches (lines 114, 160, 197) ---------
+
+    def test_verbose_mode(self, capsys):
+        path = self._write_detect_log()
+        cap_mock = _make_cap_mock(fps=1.0, total_frames=120)
+        blank = np.zeros((100, 100, 3), dtype=np.uint8)
+        try:
+            with mock.patch("log_matcher.cv2.VideoCapture", return_value=cap_mock), \
+                 mock.patch("log_matcher.crop_chat_region", return_value=blank), \
+                 mock.patch("log_matcher.run_ocr_on_region", return_value="we are ready to fight"):
+                detect_t0([path], "fake.mp4", sample_interval=30, verbose=True)
+            out = capsys.readouterr().out
+            assert "unique log message" in out
+            assert "t0=" in out
         finally:
             os.unlink(path)

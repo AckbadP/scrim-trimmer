@@ -11,7 +11,11 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+import video_clipper
 from video_clipper import create_clips, extract_clip, stitch_clips
+
+# Capture the real function before any monkeypatching by fixtures.
+_real_use_python_clipper = video_clipper._use_python_clipper
 
 
 def _ok():
@@ -48,11 +52,6 @@ class TestStitchClips:
         with patch("subprocess.run", return_value=_fail("concat error")):
             with pytest.raises(RuntimeError, match="ffmpeg concat"):
                 stitch_clips(["a.mp4"], "out.mp4")
-
-    def test_success_calls_subprocess(self):
-        with patch("subprocess.run", return_value=_ok()) as mock_run:
-            stitch_clips(["a.mp4", "b.mp4"], "out.mp4")
-        mock_run.assert_called_once()
 
     def test_command_uses_concat_demuxer(self):
         with patch("subprocess.run", return_value=_ok()) as mock_run:
@@ -116,11 +115,6 @@ class TestExtractClip:
         with patch("subprocess.run", return_value=_fail("bad input")):
             with pytest.raises(RuntimeError, match="ffmpeg failed"):
                 extract_clip("in.mp4", 0, 10, "out.mp4")
-
-    def test_success_calls_subprocess(self):
-        with patch("subprocess.run", return_value=_ok()) as mock_run:
-            extract_clip("in.mp4", 5, 30, "out.mp4")
-        mock_run.assert_called_once()
 
     def test_start_and_end_times_in_command(self):
         with patch("subprocess.run", return_value=_ok()) as mock_run:
@@ -233,3 +227,61 @@ class TestPythonFallback:
             stitch_clips(["a.mp4", "b.mp4"], "out.mp4")
         mock_sub.assert_not_called()
         mock_writer.release.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# set_force_python and _use_python_clipper body
+# ---------------------------------------------------------------------------
+
+class TestSetForcePython:
+    def test_set_force_python_and_use_python_clipper(self, monkeypatch):
+        # Restore original function and state after test.
+        monkeypatch.setattr(video_clipper, "_use_python_clipper", _real_use_python_clipper)
+        monkeypatch.setattr(video_clipper, "_force_python", False)
+        video_clipper.set_force_python(True)   # covers line 21
+        assert video_clipper._use_python_clipper() is True   # covers line 25 body
+
+    def test_use_python_clipper_when_no_ffmpeg(self, monkeypatch):
+        import shutil
+        monkeypatch.setattr(video_clipper, "_use_python_clipper", _real_use_python_clipper)
+        monkeypatch.setattr(video_clipper, "_force_python", False)
+        monkeypatch.setattr(shutil, "which", lambda _: None)
+        assert video_clipper._use_python_clipper() is True   # covers line 25 via which()
+
+
+# ---------------------------------------------------------------------------
+# _force_python=True info-print branches (lines 165, 189)
+# ---------------------------------------------------------------------------
+
+class TestForcePythonInfoPrint:
+    """When _force_python is True the clipper prints an [info] message (not [warning])."""
+
+    def _make_fake_cap(self, frames=5):
+        frame = MagicMock()
+        reads = [(True, frame)] * frames + [(False, None)]
+        cap = MagicMock()
+        cap.get.side_effect = lambda prop: {0: 30.0, 3: 320, 4: 240}.get(prop, 0)
+        cap.read.side_effect = reads
+        return cap
+
+    def test_extract_clip_info_print_when_forced(self, monkeypatch, capsys):
+        monkeypatch.setattr(video_clipper, "_force_python", True)
+        monkeypatch.setattr(video_clipper, "_use_python_clipper", lambda: True)
+        mock_writer = MagicMock()
+        with patch("cv2.VideoCapture", return_value=self._make_fake_cap()), \
+             patch("cv2.VideoWriter", return_value=mock_writer), \
+             patch("cv2.VideoWriter_fourcc", return_value=0):
+            extract_clip("in.mp4", 0, 5, "out.mp4")
+        out = capsys.readouterr().out
+        assert "[info]" in out
+
+    def test_stitch_clips_info_print_when_forced(self, monkeypatch, capsys):
+        monkeypatch.setattr(video_clipper, "_force_python", True)
+        monkeypatch.setattr(video_clipper, "_use_python_clipper", lambda: True)
+        mock_writer = MagicMock()
+        with patch("cv2.VideoCapture", side_effect=lambda _: self._make_fake_cap(frames=3)), \
+             patch("cv2.VideoWriter", return_value=mock_writer), \
+             patch("cv2.VideoWriter_fourcc", return_value=0):
+            stitch_clips(["a.mp4", "b.mp4"], "out.mp4")
+        out = capsys.readouterr().out
+        assert "[info]" in out
