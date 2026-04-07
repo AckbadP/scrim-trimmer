@@ -6,13 +6,13 @@ On Windows: uses the native Windows file dialog via Tkinter (already native).
 """
 
 import os
+import shutil
 import subprocess
 import sys
 
 
 def _which(cmd: str) -> bool:
     """Return True if cmd is available on PATH."""
-    import shutil
     return shutil.which(cmd) is not None
 
 

@@ -12,8 +12,6 @@ from unittest.mock import MagicMock, patch
 import cv2
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from frame_extractor import extract_frames, get_video_duration
 
 
@@ -98,22 +96,45 @@ class TestExtractFrames:
         with patch("cv2.VideoCapture", return_value=cap):
             results = list(extract_frames("fake.mp4"))
         seconds = [s for s, _ in results]
-        assert seconds == [0, 1, 2, 3]   # int(3/1)+1 = 4 iterations
+        assert seconds == [0, 1, 2]   # 3 frames at 1 fps → seconds 0, 1, 2
 
-    def test_skips_frames_that_fail_to_read(self):
+    def test_stops_when_read_fails(self):
         import numpy as np
         fake_frame = np.zeros((10, 10, 3), dtype=np.uint8)
-        # duration_seconds = int(3/1)+1 = 4 → 4 reads attempted
+        # Sequential decoder: a failed read terminates iteration (stream ended/error)
         cap = _mock_cap(fps=1.0, total_frames=3)
         cap.read.side_effect = [
-            (False, None),
             (True, fake_frame),
-            (True, fake_frame),
-            (True, fake_frame),
+            (False, None),   # fails at second=1 → stop
         ]
         with patch("cv2.VideoCapture", return_value=cap):
             results = list(extract_frames("fake.mp4"))
-        # t=0 skipped (read failed); t=1, t=2, t=3 yielded
         seconds = [s for s, _ in results]
-        assert 0 not in seconds
-        assert 1 in seconds
+        assert seconds == [0]
+
+    def test_target_frame_exceeds_total_stops_iteration(self):
+        # fps=2, total_frames=2: after yielding second=0, next target_frame=2 >= 2
+        # → break on line 44, only one frame yielded.
+        import numpy as np
+        fake_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        cap = _mock_cap(fps=2.0, total_frames=2)
+        cap.read.return_value = (True, fake_frame)
+        with patch("cv2.VideoCapture", return_value=cap):
+            results = list(extract_frames("fake.mp4"))
+        seconds = [s for s, _ in results]
+        assert seconds == [0]
+
+    def test_grab_failure_stops_iteration(self):
+        # fps=2, total_frames=5: yields second=0, grabs frame 1 successfully
+        # (covers current_frame += 1 at line 52), reads frame 2, yields second=1,
+        # then tries to grab frame 3 but grab() fails → early return.
+        import numpy as np
+        fake_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+        cap = _mock_cap(fps=2.0, total_frames=5)
+        cap.read.return_value = (True, fake_frame)
+        cap.grab.side_effect = [True, False]  # first grab succeeds, second fails
+        with patch("cv2.VideoCapture", return_value=cap):
+            results = list(extract_frames("fake.mp4"))
+        seconds = [s for s, _ in results]
+        assert seconds == [0, 1]
+        cap.release.assert_called()

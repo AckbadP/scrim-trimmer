@@ -31,14 +31,33 @@ def extract_frames(
         cap.release()
         raise ValueError(f"Invalid FPS ({fps}) in video: {video_path}")
 
-    duration_seconds = int(total_frames / fps) + 1
+    # Decode sequentially: advance frame-by-frame, grabbing only the frame
+    # nearest to each whole second.  This avoids a costly keyframe seek on
+    # every iteration (the old cap.set(CAP_PROP_POS_FRAMES, …) approach).
+    frames_per_second = fps
+    next_target = 0          # the next whole-second index we want to yield
+    current_frame = 0        # how many frames we have read so far
 
-    for second in range(duration_seconds):
-        frame_number = int(second * fps)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+    while current_frame < total_frames:
+        target_frame = int(round(next_target * frames_per_second))
+        if target_frame >= total_frames:
+            break
+
+        # Skip frames between the current position and the target by grabbing
+        # (cheap: demux without decode) rather than seeking.
+        while current_frame < target_frame:
+            if not cap.grab():
+                cap.release()
+                return
+            current_frame += 1
+
         ret, frame = cap.read()
-        if ret:
-            yield second, frame
+        if not ret:
+            break
+        current_frame += 1
+
+        yield next_target, frame
+        next_target += 1
 
     cap.release()
 

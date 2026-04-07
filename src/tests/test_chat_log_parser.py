@@ -6,8 +6,6 @@ import sys
 import os
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from chat_log_parser import read_chat_log, parse_chat_logs, game_time_to_seconds, _parse_log_line
 
 
@@ -226,6 +224,35 @@ class TestParseChatLogs:
         finally:
             os.unlink(path)
 
+    def test_empty_message_skipped(self):
+        # Entries with an empty message must be silently skipped
+        # (the "if not words: continue" path, line 98-99).
+        # read_chat_log is mocked to inject an entry with msg="" directly,
+        # since _parse_log_line strips trailing whitespace before regex matching.
+        from unittest.mock import patch
+        from datetime import datetime, timezone
+        ts_cd = datetime(2026, 3, 25, 1, 7, 49, tzinfo=timezone.utc)
+        ts_empty = datetime(2026, 3, 25, 1, 8, 0, tzinfo=timezone.utc)
+        fake_entries = [(ts_cd, "P", "CD"), (ts_empty, "P", "")]
+        t0 = game_time_to_seconds("01:05:00")
+        with patch("chat_log_parser.read_chat_log", return_value=fake_entries):
+            cd_times, wf_times = parse_chat_logs(["fake.log"], t0, 3600)
+        assert len(cd_times) == 1   # only the real CD is counted
+
+    def test_midnight_wrap_applied_and_included(self):
+        # Midnight crossing: t0=23:30:00 (84600s), event at 00:30:00 (1800s).
+        # video_sec = 1800 - 84600 = -82800 < -3600 → wrap: +86400 → 3600.
+        # Within duration 7200 → event is included.
+        path = self._make_log([
+            ("00:30:00", "P", "CD"),
+        ])
+        t0 = game_time_to_seconds("23:30:00")
+        try:
+            cd_times, _ = parse_chat_logs([path], t0, 7200)
+            assert 3600 in cd_times
+        finally:
+            os.unlink(path)
+
 
 # ---------------------------------------------------------------------------
 # game_time_to_seconds — error handling
@@ -278,3 +305,27 @@ class TestParseLogLine:
         _, player, msg = result
         assert player == "Padded Player"
         assert msg == "trimmed message"
+
+    def test_invalid_date_returns_none(self):
+        # Month 13 matches the regex but fails strptime → ValueError → None
+        line = "[ 2026.13.25 01:07:49 ] Player > CD"
+        assert _parse_log_line(line) is None
+
+
+# ---------------------------------------------------------------------------
+# read_chat_log — UTF-16-LE fallback
+# ---------------------------------------------------------------------------
+
+class TestReadChatLogUtf16Fallback:
+    def test_utf16_le_fallback_on_decode_error(self):
+        # Odd-length byte string raises UnicodeDecodeError for 'utf-16';
+        # the fallback 'utf-16-le' with errors='replace' must succeed.
+        import tempfile, os
+        fd, path = tempfile.mkstemp(suffix='.txt')
+        with os.fdopen(fd, 'wb') as f:
+            f.write(b'\x58\x00\x59')  # 3 bytes: odd length → utf-16 fails
+        try:
+            entries = read_chat_log(path)
+            assert isinstance(entries, list)
+        finally:
+            os.unlink(path)

@@ -11,8 +11,10 @@ Launch:
 
 import argparse
 import os
+import re
 import sys
 import threading
+import time
 
 import psutil
 
@@ -75,6 +77,10 @@ class App(TkinterDnD.Tk):
         self.video_path: str | None = None
         self._thumb_ref = None  # prevent GC of PhotoImage
         self._thumb_pil: Image.Image | None = None  # source image for re-rendering on resize
+        self._cancel_event = threading.Event()
+        self._timer_start: float | None = None
+        self._timer_frozen: float | None = None
+        self._timer_after_id = None
 
         # Canvas state
         self._canvas_img_id = None
@@ -182,7 +188,7 @@ class App(TkinterDnD.Tk):
         self.t0_var = tk.StringVar()
         self.chat_log_var = tk.StringVar()
         self.verbose_var = tk.BooleanVar(value=False)
-        self.force_python_var = tk.BooleanVar(value=False)
+        self.run_without_ffmpeg_var = tk.BooleanVar(value=False)
         self.force_ocr_var = tk.BooleanVar(value=False)
         _cpu = os.cpu_count() or 4
         self.threads_var = tk.IntVar(value=self._conf.get("threads") or _cpu)
@@ -279,12 +285,12 @@ class App(TkinterDnD.Tk):
         ttk.Label(adv_tab, text="verbose").grid(row=5, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.verbose_var).grid(row=5, column=1, sticky=tk.W, pady=2)
 
-        # force Python clipper
-        ttk.Label(adv_tab, text="Force Python clipper").grid(
+        # run without ffmpeg
+        ttk.Label(adv_tab, text="Run without ffmpeg").grid(
             row=6, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(
-            adv_tab, variable=self.force_python_var,
-            command=self._on_force_python_toggle,
+            adv_tab, variable=self.run_without_ffmpeg_var,
+            command=self._on_run_without_ffmpeg_toggle,
         ).grid(row=6, column=1, sticky=tk.W, pady=2)
 
         # force OCR pipeline
@@ -329,18 +335,40 @@ class App(TkinterDnD.Tk):
         ttk.Button(btn_frame, text="Reset", command=self._reset, width=10).pack(side=tk.LEFT, padx=6)
         ttk.Button(btn_frame, text="Help", command=self._show_help, width=10).pack(side=tk.LEFT, padx=6)
 
-        # --- Status bar ---
-        self.status_label = ttk.Label(main_frame, text="Ready", anchor=tk.W,
-                                      relief=tk.SUNKEN, padding=(4, 2))
-        self.status_label.pack(fill=tk.X, pady=(4, 0))
+        # --- Status / progress bar ---
+        style = ttk.Style()
+        _trough = style.lookup("TProgressbar", "troughcolor") or "#d9d9d9"
+        _fill = style.lookup("TProgressbar", "background") or "#4a90d9"
+        _fg = style.lookup("TLabel", "foreground") or "black"
+        self._progress_pct = 0
+        self._progress_msg = "Ready"
+        self._progress_running = False
+        self._progress_fg_idle = _fg
+        self.progress_canvas = tk.Canvas(main_frame, height=22, bd=1, relief=tk.SUNKEN,
+                                         highlightthickness=0, bg=_trough)
+        self.progress_canvas.pack(fill=tk.X, pady=(4, 0))
+        self._prog_fill = self.progress_canvas.create_rectangle(0, 0, 0, 22, fill=_fill, outline="")
+        self._prog_text = self.progress_canvas.create_text(
+            0, 11, text="Ready", fill=_fg, anchor="center",
+            font=("TkDefaultFont", 9, "bold"))
+        self.progress_canvas.bind("<Configure>", lambda e: self._redraw_progress())
 
-        # --- Run button (bottom) ---
+        # --- Run / Cancel buttons (bottom) ---
         run_frame = ttk.Frame(main_frame)
         run_frame.pack(fill=tk.X, pady=(8, 4))
+        run_frame.columnconfigure(0, weight=1)
 
-        self.run_btn = ttk.Button(run_frame, text="Run", command=self._run, width=20,
+        self.run_btn = ttk.Button(run_frame, text="Run", command=self._run,
                                   padding=(0, 8))
-        self.run_btn.pack(fill=tk.X, padx=6)
+        self.run_btn.grid(row=0, column=0, sticky=tk.EW, padx=(6, 3))
+
+        self.cancel_btn = ttk.Button(run_frame, text="Cancel", command=self._cancel,
+                                     padding=(0, 8), state="disabled", width=10)
+        self.cancel_btn.grid(row=0, column=1, padx=(3, 6))
+
+        self.timer_label = ttk.Label(run_frame, text="", width=7, anchor="e",
+                                     font=("TkFixedFont", 9))
+        self.timer_label.grid(row=0, column=2, padx=(0, 6))
 
     # ------------------------------------------------------------------
     # File acquisition
@@ -599,15 +627,15 @@ class App(TkinterDnD.Tk):
         "Continue with the Python clipper anyway?"
     )
 
-    def _on_force_python_toggle(self):
-        if self.force_python_var.get():
+    def _on_run_without_ffmpeg_toggle(self):
+        if self.run_without_ffmpeg_var.get():
             proceed = messagebox.askokcancel(
                 "Warning: Python clipper has limitations",
                 self._FFMPEG_WARNING,
                 icon="warning",
             )
             if not proceed:
-                self.force_python_var.set(False)
+                self.run_without_ffmpeg_var.set(False)
 
     def _run(self):
         if not self.video_path:
@@ -638,13 +666,28 @@ class App(TkinterDnD.Tk):
             t0=t0_raw,
             threads=self.threads_var.get(),
             ram_cap_gb=self.ram_cap_var.get(),
-            force_python_clipper=bool(self.force_python_var.get()),
+            run_without_ffmpeg=bool(self.run_without_ffmpeg_var.get()),
             force_ocr=bool(self.force_ocr_var.get()),
             chapters_dir=chapters_dir,
         )
 
+        self._cancel_event.clear()
         self.run_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="normal")
+        self.timer_label.configure(text="")
+        self._start_timer()
         self._set_status("Running...")
+
+        def _on_progress(current, total):
+            pct = int(current / total * 100) if total > 0 else 0
+            self.after(0, lambda p=pct: self._update_progress(p))
+
+        def _on_status(msg: str):
+            self.after(0, lambda m=msg: self._set_status(m))
+
+        args.progress_callback = _on_progress
+        args.status_callback = _on_status
+        args.cancel_event = self._cancel_event
 
         def worker():
             try:
@@ -655,6 +698,8 @@ class App(TkinterDnD.Tk):
                     self.after(0, lambda t=chapters_text: self._show_chapters(t))
                 if self.close_on_complete_var.get():
                     self.after(0, self.destroy)
+            except pipeline.CancelledError:
+                self.after(0, lambda: self._set_status("Cancelled"))
             except SystemExit as e:
                 code = e.code
                 self.after(0, lambda: self._set_status(f"Stopped (exit {code})"))
@@ -663,8 +708,16 @@ class App(TkinterDnD.Tk):
                 self.after(0, lambda: self._set_status(f"Error: {msg}"))
             finally:
                 self.after(0, lambda: self.run_btn.configure(state="normal"))
+                self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
+                self.after(0, lambda: self._finish_progress())
+                self.after(0, self._stop_timer)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _cancel(self):
+        self._cancel_event.set()
+        self.cancel_btn.configure(state="disabled")
+        self._set_status("Cancelling...")
 
     # ------------------------------------------------------------------
     # Reset
@@ -686,6 +739,11 @@ class App(TkinterDnD.Tk):
         self.verbose_var.set(False)
         self.preview_frame.pack_forget()
         self.run_btn.configure(state="disabled")
+        self._finish_progress()
+        self._stop_timer()
+        self._timer_start = None
+        self._timer_frozen = None
+        self.timer_label.configure(text="")
         self._set_status("Ready")
 
     # ------------------------------------------------------------------
@@ -693,8 +751,7 @@ class App(TkinterDnD.Tk):
     # ------------------------------------------------------------------
 
     def _show_help(self):
-        import re
-        readme_path = _resource_path("../`README.md")
+        readme_path = _resource_path("../README.md")
         try:
             with open(readme_path, "r") as f:
                 content = f.read()
@@ -825,11 +882,14 @@ class App(TkinterDnD.Tk):
         ttk.Button(btn_frame, text="Close", command=win.destroy).pack(side=tk.RIGHT)
 
         win.update_idletasks()
-        win.geometry(f"{win.winfo_reqwidth() + 20}x{win.winfo_reqheight()}")
+        w = win.winfo_reqwidth() + 20
+        h = win.winfo_reqheight()
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        win.geometry(f"{w}x{h}+{x}+{y}")
 
     def _md_inline(self, widget, text, base_tag=None):
         """Insert text with inline `code` and **bold** formatting applied."""
-        import re
         for part in re.split(r"(`[^`]+`|\*\*[^*]+\*\*)", text):
             if part.startswith("`") and part.endswith("`"):
                 tags = ("inline_code", base_tag) if base_tag else ("inline_code",)
@@ -883,8 +943,65 @@ class App(TkinterDnD.Tk):
             return None
         return min(candidates, key=lambda p: abs(os.path.getmtime(p) - video_mtime))
 
+    def _redraw_progress(self):
+        w = self.progress_canvas.winfo_width()
+        h = self.progress_canvas.winfo_height()
+        fill_w = int(w * self._progress_pct / 100)
+        self.progress_canvas.coords(self._prog_fill, 0, 0, fill_w, h)
+        self.progress_canvas.coords(self._prog_text, w // 2, h // 2)
+        text_color = "white" if self._progress_running else self._progress_fg_idle
+        self.progress_canvas.itemconfigure(self._prog_text, text=self._progress_msg, fill=text_color)
+
+    def _update_progress(self, pct: int):
+        self._progress_pct = pct
+        self._progress_running = True
+        self._redraw_progress()
+
+    def _finish_progress(self):
+        self._progress_pct = 0
+        self._progress_running = False
+        self._redraw_progress()
+
     def _set_status(self, msg: str):
-        self.status_label.configure(text=msg)
+        self._progress_msg = msg
+        self._redraw_progress()
+
+    # ------------------------------------------------------------------
+    # Execution timer
+    # ------------------------------------------------------------------
+
+    def _start_timer(self):
+        if self._timer_after_id is not None:
+            self.after_cancel(self._timer_after_id)
+            self._timer_after_id = None
+        self._timer_start = time.monotonic()
+        self._timer_frozen = None
+        self._tick_timer()
+
+    def _stop_timer(self):
+        if self._timer_after_id is not None:
+            self.after_cancel(self._timer_after_id)
+            self._timer_after_id = None
+        if self._timer_start is not None:
+            self._timer_frozen = time.monotonic() - self._timer_start
+        self._render_timer()
+
+    def _tick_timer(self):
+        self._render_timer()
+        self._timer_after_id = self.after(500, self._tick_timer)
+
+    def _render_timer(self):
+        if self._timer_start is None:
+            return
+        elapsed = self._timer_frozen if self._timer_frozen is not None else (
+            time.monotonic() - self._timer_start)
+        m, s = divmod(int(elapsed), 60)
+        h, m = divmod(m, 60)
+        if h:
+            text = f"{h}:{m:02}:{s:02}"
+        else:
+            text = f"{m}:{s:02}"
+        self.timer_label.configure(text=text)
 
     @staticmethod
     def _fmt_duration(seconds: float) -> str:

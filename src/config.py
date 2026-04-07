@@ -29,10 +29,11 @@ def default_log_dir() -> str:
             / ".local/share/Steam/steamapps/compatdata/8500/pfx"
             / "drive_c/users/steamuser/Documents/EVE/logs/Chatlogs"
         )
+        username = os.environ.get("USER") or Path.home().name
         lutris_path = (
             Path.home()
             / "Games/eve-online/drive_c/users"
-            / os.getlogin()
+            / username
             / "Documents/EVE/logs/Chatlogs"
         )
         candidates = [p for p in (steam_path, lutris_path) if p.is_dir()]
