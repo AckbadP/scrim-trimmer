@@ -6,8 +6,6 @@ fractions of the frame dimensions.  Default: left 15% x bottom 65% of height,
 which matches the EVE Online local chat window position.
 """
 
-import os
-
 import cv2
 import numpy as np
 import pytesseract
@@ -69,11 +67,8 @@ def run_ocr_on_region(region: np.ndarray) -> str:
         OCR text string from the chat window.
     """
     pil_img = preprocess_for_ocr(region)
-    config = "--psm 6 --oem 3"
-    tessdata = os.environ.get("TESSDATA_PREFIX")
-    if tessdata:
-        config = f"--tessdata-dir {tessdata} {config}"
-    return pytesseract.image_to_string(pil_img, config=config)
+    # PSM 6: Assume a single uniform block of text (good for chat columns)
+    return pytesseract.image_to_string(pil_img, config="--psm 6 --oem 3")
 
 
 def run_ocr(
