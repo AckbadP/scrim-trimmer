@@ -70,8 +70,9 @@ _DEFAULT_REGION = [0.0, 0.35, 0.15, 1.0]  # [x1, y1, x2, y2] as fractions
 
 class App(TkinterDnD.Tk):
     def __init__(self):
-        super().__init__()
+        super().__init__(className="scrim-trimmer")
         self.title("EVE AT Practice Trimmer")
+        self.wm_iconname("scrim-trimmer")
         self.resizable(True, True)
 
         self.video_path: str | None = None
