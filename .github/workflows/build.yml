@@ -20,10 +20,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install system dependencies
-        run: |
-          sudo add-apt-repository ppa:alex-p/tesseract-ocr5 -y
-          sudo apt-get update -q
-          sudo apt-get install -y ffmpeg tesseract-ocr
+        run: sudo apt-get install -y ffmpeg tesseract-ocr
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt pytest
@@ -59,10 +56,7 @@ jobs:
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo add-apt-repository ppa:alex-p/tesseract-ocr5 -y
-          sudo apt-get update -q
-          sudo apt-get install -y ffmpeg tesseract-ocr
+        run: sudo apt-get install -y ffmpeg tesseract-ocr
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
