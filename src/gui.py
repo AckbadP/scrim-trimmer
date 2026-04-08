@@ -752,7 +752,10 @@ class App(TkinterDnD.Tk):
     # ------------------------------------------------------------------
 
     def _show_help(self):
-        readme_path = _resource_path("../README.md")
+        if getattr(sys, "frozen", False):
+            readme_path = _resource_path("README.md")
+        else:
+            readme_path = _resource_path("../README.md")
         try:
             with open(readme_path, "r") as f:
                 content = f.read()
