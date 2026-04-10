@@ -298,11 +298,13 @@ def run(args) -> None:
         print(f"\n[3/4] Stitching clips into {final_output}...")
         stitch_clips(clip_paths, final_output)
 
+        for clip in clip_paths:
+            os.remove(clip)
+
         chapters_path = write_chapter_timestamps(pairs, final_output, getattr(args, "chapters_dir", None))
 
         print(f"\nDone! Final video: {final_output}")
         print(f"Chapter timestamps:  {chapters_path}")
-        print(f"Individual clips saved to: {output_dir}/")
         with open(chapters_path) as _f:
             return _f.read()
 
@@ -388,11 +390,13 @@ def run(args) -> None:
     print(f"\n[4/4] Stitching clips into {final_output}...")
     stitch_clips(clip_paths, final_output)
 
+    for clip in clip_paths:
+        os.remove(clip)
+
     chapters_path = write_chapter_timestamps(pairs, final_output)
 
     print(f"\nDone! Final video: {final_output}")
     print(f"Chapter timestamps:  {chapters_path}")
-    print(f"Individual clips saved to: {output_dir}/")
     with open(chapters_path) as _f:
         return _f.read()
 
