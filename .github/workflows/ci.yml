@@ -1,9 +1,6 @@
-name: Build
+name: CI
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 jobs:
@@ -95,35 +92,4 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/${{ matrix.artifact }}
-
-  release:
-    needs: [test, build]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create source archives
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          git archive --format=zip --prefix=scrim-trimmer-${TAG}/ HEAD -o scrim-trimmer-${TAG}.zip
-          git archive --format=tar.gz --prefix=scrim-trimmer-${TAG}/ HEAD -o scrim-trimmer-${TAG}.tar.gz
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/scrim-trimmer-linux/scrim-trimmer-x86_64.AppImage
-            artifacts/scrim-trimmer-windows/scrim-trimmer.exe
-            artifacts/scrim-trimmer-macos/scrim-trimmer
-            scrim-trimmer-*.zip
-            scrim-trimmer-*.tar.gz
+          retention-days: 7

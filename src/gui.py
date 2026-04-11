@@ -109,6 +109,9 @@ class App(TkinterDnD.Tk):
         self.show_chapters_popup_var.trace_add("write", self._save_config)
         self.close_on_complete_var = tk.BooleanVar(value=bool(_conf.get("close_on_complete", False)))
         self.close_on_complete_var.trace_add("write", self._save_config)
+        self.youtube_upload_var = tk.BooleanVar(value=bool(_conf.get("youtube_upload", False)))
+        self.youtube_upload_var.trace_add("write", self._save_config)
+        self.youtube_title_var = tk.StringVar(value=_conf.get("youtube_title", ""))
 
         self._build_ui()
 
@@ -311,6 +314,26 @@ class App(TkinterDnD.Tk):
             row=9, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.close_on_complete_var).grid(
             row=9, column=1, sticky=tk.W, pady=2)
+
+        # YouTube upload
+        ttk.Separator(adv_tab, orient=tk.HORIZONTAL).grid(
+            row=10, column=0, columnspan=2, sticky=tk.EW, pady=(8, 4))
+        ttk.Label(adv_tab, text="Upload to YouTube").grid(
+            row=11, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Checkbutton(adv_tab, variable=self.youtube_upload_var).grid(
+            row=11, column=1, sticky=tk.W, pady=2)
+
+        ttk.Label(adv_tab, text="Video title").grid(
+            row=12, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        yt_title_frame = ttk.Frame(adv_tab)
+        yt_title_frame.grid(row=12, column=1, sticky=tk.EW, pady=2)
+        yt_title_frame.columnconfigure(0, weight=1)
+        self._yt_title_entry = ttk.Entry(yt_title_frame, textvariable=self.youtube_title_var)
+        self._yt_title_entry.grid(row=0, column=0, sticky=tk.EW)
+        self._yt_title_entry.bind("<FocusOut>", lambda _: self._save_config())
+        ttk.Label(adv_tab, text="Leave blank to use the video filename.",
+                  foreground="#888", font=("TkDefaultFont", 8)).grid(
+            row=13, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
 
         _last_nb_content_height = [None]
 
@@ -677,6 +700,8 @@ class App(TkinterDnD.Tk):
             run_without_ffmpeg=bool(self.run_without_ffmpeg_var.get()),
             force_ocr=bool(self.force_ocr_var.get()),
             chapters_dir=chapters_dir,
+            youtube_upload=bool(self.youtube_upload_var.get()),
+            youtube_title=self.youtube_title_var.get().strip(),
         )
 
         self._cancel_event.clear()
@@ -699,11 +724,13 @@ class App(TkinterDnD.Tk):
 
         def worker():
             try:
-                chapters_text = pipeline.run(args)
-                self.after(0, lambda: self._set_status(
-                    f"Done! Output: {args.output}/final_output.mp4"))
+                chapters_text, youtube_url = pipeline.run(args)
+                status_msg = f"Done! Output: {args.output}/final_output.mp4"
+                if youtube_url:
+                    status_msg += f"  |  YouTube: {youtube_url}"
+                self.after(0, lambda m=status_msg: self._set_status(m))
                 if chapters_text and self.show_chapters_popup_var.get():
-                    self.after(0, lambda t=chapters_text: self._show_chapters(t))
+                    self.after(0, lambda t=chapters_text, u=youtube_url: self._show_chapters(t, u))
                 if self.close_on_complete_var.get():
                     self.after(0, self.destroy)
             except pipeline.CancelledError:
@@ -846,12 +873,26 @@ class App(TkinterDnD.Tk):
 
         text.configure(state="disabled")
 
-    def _show_chapters(self, chapters_text: str):
+    def _show_chapters(self, chapters_text: str, youtube_url: "str | None" = None):
         """Open a window showing YouTube chapter timestamps with a copy button."""
         win = tk.Toplevel(self)
         win.title("YouTube Chapter Timestamps")
         win.resizable(True, True)
         win.minsize(300, 200)
+
+        if youtube_url:
+            url_frame = ttk.Frame(win, padding=(12, 10, 12, 0))
+            url_frame.pack(fill=tk.X)
+            ttk.Label(url_frame, text="YouTube URL:", font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
+            url_var = tk.StringVar(value=youtube_url)
+            url_entry = ttk.Entry(url_frame, textvariable=url_var, state="readonly", width=36)
+            url_entry.pack(side=tk.LEFT, padx=(6, 0), fill=tk.X, expand=True)
+
+            def _open_url():
+                import webbrowser
+                webbrowser.open(youtube_url)
+
+            ttk.Button(url_frame, text="Open", command=_open_url).pack(side=tk.LEFT, padx=(4, 0))
 
         ttk.Label(
             win,
@@ -926,6 +967,8 @@ class App(TkinterDnD.Tk):
             "chat_region": self._chat_region,
             "threads": self.threads_var.get(),
             "ram_cap_gb": self.ram_cap_var.get(),
+            "youtube_upload": bool(self.youtube_upload_var.get()),
+            "youtube_title": self.youtube_title_var.get(),
         })
 
     @staticmethod

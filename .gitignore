@@ -1,4 +1,5 @@
 *.mp4
+client_secrets.json
 out/*
 *.png
 resources/*

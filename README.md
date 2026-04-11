@@ -97,10 +97,22 @@ The thumbnail is resizable: drag the window edges to make it larger for more pre
 | **Force Python clipper** | off | Use the pure-Python ffmpeg wrapper instead of the native ffmpeg binary for clipping. Slower but useful for debugging. |
 | **Show timestamps popup** | on | After a successful run, open a popup window displaying YouTube chapter timestamps (see below). |
 | **Close when done** | off | Automatically close the application once processing completes. |
+| **Upload to YouTube** | off | Automatically upload `final_output.mp4` to YouTube as an unlisted video once processing finishes (see below). |
+| **Video title** | *(blank)* | Title for the uploaded YouTube video. Leave blank to use the video filename. |
 
 ### YouTube chapter timestamps
 
 After each successful run, the tool generates a list of YouTube chapter timestamps — one line per clip in `0:00 Match 1` format. If **Show timestamps popup** is enabled, a window opens showing the timestamps with a **Copy to Clipboard** button. If a **Chapters file dir** is configured, the timestamps are also written to a `.txt` file in that directory.
+
+### YouTube upload
+
+When **Upload to YouTube** is enabled, the finished video is automatically uploaded to YouTube as an **unlisted** video after processing completes. The chapter timestamps are included in the video description.
+
+**First-time setup** — the first time you run with upload enabled, a browser window will open asking you to sign in to Google and grant the app permission to upload videos to your YouTube channel. After approving, a token is saved to `~/.config/eve-trimmer/youtube_token.json` and the browser step is not repeated.
+
+Once the upload finishes:
+- The YouTube URL is shown in the status bar
+- If **Show timestamps popup** is enabled, the URL appears at the top of the timestamps window with an **Open** button
 
 ## CLI Usage
 

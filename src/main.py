@@ -207,6 +207,33 @@ def _progress_bar(current: int, total: int, elapsed: float, width: int = 30) -> 
     return f"\r  [{bar}] {pct*100:5.1f}%  {current}/{total}s{eta_str}  "
 
 
+def _maybe_upload(
+    args,
+    video_path: str,
+    description: str,
+    notify,
+) -> "str | None":
+    """Upload to YouTube if enabled in args. Returns URL or None."""
+    if not getattr(args, "youtube_upload", False):
+        return None
+    try:
+        from youtube_uploader import upload as yt_upload
+        title = (getattr(args, "youtube_title", "") or "").strip()
+        if not title:
+            title = os.path.splitext(os.path.basename(args.video))[0]
+        notify("Uploading to YouTube...")
+        print("\nUploading to YouTube...")
+        url = yt_upload(video_path, title, description)
+        notify(f"Uploaded: {url}")
+        print(f"YouTube: {url}")
+        return url
+    except Exception as exc:
+        msg = str(exc)
+        notify(f"YouTube upload failed: {msg}")
+        print(f"YouTube upload failed: {msg}", file=sys.stderr)
+        return None
+
+
 def run(args) -> None:
     """Run the trimmer pipeline with a pre-built args namespace."""
     video_clipper.set_force_python(getattr(args, "run_without_ffmpeg", False))
@@ -306,7 +333,10 @@ def run(args) -> None:
         print(f"\nDone! Final video: {final_output}")
         print(f"Chapter timestamps:  {chapters_path}")
         with open(chapters_path) as _f:
-            return _f.read()
+            chapters_text = _f.read()
+
+        youtube_url = _maybe_upload(args, final_output, chapters_text, _notify)
+        return chapters_text, youtube_url
 
     # --- OCR mode ---
     x1, y1, x2, y2 = args.chat_region
@@ -398,7 +428,10 @@ def run(args) -> None:
     print(f"\nDone! Final video: {final_output}")
     print(f"Chapter timestamps:  {chapters_path}")
     with open(chapters_path) as _f:
-        return _f.read()
+        chapters_text = _f.read()
+
+    youtube_url = _maybe_upload(args, final_output, chapters_text, _notify)
+    return chapters_text, youtube_url
 
 
 def main():
