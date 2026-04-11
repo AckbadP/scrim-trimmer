@@ -7,6 +7,7 @@ Token is cached at ~/.config/eve-trimmer/youtube_token.json and auto-refreshed.
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 from google.oauth2.credentials import Credentials
@@ -28,8 +29,12 @@ def _secrets_path() -> str:
     return os.path.join(base, "client_secrets.json")
 
 
-def get_credentials() -> Credentials:
-    """Load cached credentials or run OAuth2 browser flow."""
+def get_credentials(cancel_event=None) -> Credentials:
+    """Load cached credentials or run OAuth2 browser flow.
+
+    If cancel_event (threading.Event) is provided and set while the browser
+    OAuth flow is waiting, raises RuntimeError so the caller can clean up.
+    """
     creds = None
     if _TOKEN_PATH.exists():
         creds = Credentials.from_authorized_user_file(str(_TOKEN_PATH), SCOPES)
@@ -44,7 +49,28 @@ def get_credentials() -> Credentials:
                     "YouTube upload is unavailable in this build."
                 )
             flow = InstalledAppFlow.from_client_secrets_file(secrets, SCOPES)
-            creds = flow.run_local_server(port=0)
+
+            result: list = []
+            exc_holder: list = []
+
+            def _run_flow():
+                try:
+                    result.append(flow.run_local_server(port=0))
+                except Exception as e:
+                    exc_holder.append(e)
+
+            oauth_thread = threading.Thread(target=_run_flow, daemon=True)
+            oauth_thread.start()
+
+            while oauth_thread.is_alive():
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RuntimeError("OAuth cancelled by user")
+                oauth_thread.join(timeout=0.1)
+
+            if exc_holder:
+                raise exc_holder[0]
+            creds = result[0]
+
         _TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
         _TOKEN_PATH.write_text(creds.to_json())
     return creds
@@ -55,6 +81,7 @@ def upload(
     title: str,
     description: str,
     status_callback=None,
+    cancel_event=None,
 ) -> str:
     """
     Upload video_path to YouTube as an unlisted video.
@@ -64,11 +91,12 @@ def upload(
         title: YouTube video title.
         description: Video description (YouTube chapter timestamps).
         status_callback: Optional callable(pct: int) called with upload progress 0-100.
+        cancel_event: Optional threading.Event; if set, upload is aborted.
 
     Returns:
         YouTube URL of the uploaded video (https://youtu.be/<id>).
     """
-    creds = get_credentials()
+    creds = get_credentials(cancel_event=cancel_event)
     youtube = build("youtube", "v3", credentials=creds)
 
     body = {
@@ -97,6 +125,8 @@ def upload(
 
     response = None
     while response is None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Upload cancelled by user")
         status, response = request.next_chunk()
         if status and status_callback:
             status_callback(int(status.progress() * 100))

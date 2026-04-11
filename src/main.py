@@ -216,6 +216,7 @@ def _maybe_upload(
     """Upload to YouTube if enabled in args. Returns URL or None."""
     if not getattr(args, "youtube_upload", False):
         return None
+    cancel_event = getattr(args, "cancel_event", None)
     try:
         from youtube_uploader import upload as yt_upload
         title = (getattr(args, "youtube_title", "") or "").strip()
@@ -223,10 +224,19 @@ def _maybe_upload(
             title = os.path.splitext(os.path.basename(args.video))[0]
         notify("Uploading to YouTube...")
         print("\nUploading to YouTube...")
-        url = yt_upload(video_path, title, description)
+        url = yt_upload(video_path, title, description, cancel_event=cancel_event)
         notify(f"Uploaded: {url}")
         print(f"YouTube: {url}")
         return url
+    except RuntimeError as exc:
+        msg = str(exc)
+        if cancel_event is not None and cancel_event.is_set():
+            notify("YouTube upload cancelled")
+            print("YouTube upload cancelled", file=sys.stderr)
+        else:
+            notify(f"YouTube upload failed: {msg}")
+            print(f"YouTube upload failed: {msg}", file=sys.stderr)
+        return None
     except Exception as exc:
         msg = str(exc)
         notify(f"YouTube upload failed: {msg}")

@@ -346,7 +346,6 @@ class App(TkinterDnD.Tk):
                     self.geometry(f"{self.winfo_width()}x{self.winfo_height() + delta}")
             _last_nb_content_height[0] = new_h
             notebook.configure(height=new_h)
-        print(len(_last_nb_content_height))
 
         notebook.bind("<<NotebookTabChanged>>", _on_tab_changed)
 
