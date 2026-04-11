@@ -703,6 +703,10 @@ class App(TkinterDnD.Tk):
             youtube_title=self.youtube_title_var.get().strip(),
         )
 
+        self._launch_worker(args)
+
+    def _launch_worker(self, args):
+        """Set up UI state and start the pipeline worker thread with the given args."""
         self._cancel_event.clear()
         self.run_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
@@ -738,6 +742,8 @@ class App(TkinterDnD.Tk):
                     self.after(0, self.destroy)
             except pipeline.CancelledError:
                 self.after(0, lambda: self._set_status("Cancelled"))
+            except pipeline.MissingDependencyError as exc:
+                self.after(0, lambda e=exc, a=args: self._show_install_dialog(e.tool, a))
             except SystemExit as e:
                 captured = stderr_capture.getvalue().strip()
                 msg = captured if captured else f"Pipeline stopped (exit {e.code})"
@@ -1064,6 +1070,176 @@ class App(TkinterDnD.Tk):
         else:
             text = f"{m}:{s:02}"
         self.timer_label.configure(text=text)
+
+    # ------------------------------------------------------------------
+    # Dependency install dialog
+    # ------------------------------------------------------------------
+
+    _WINGET_IDS = {
+        "tesseract": "UB-Mannheim.TesseractOCR",
+        "ffmpeg": "Gyan.FFmpeg",
+    }
+
+    _MANUAL_URLS = {
+        "tesseract": "https://github.com/UB-Mannheim/tesseract/wiki",
+        "ffmpeg": "https://ffmpeg.org/download.html",
+    }
+
+    def _show_install_dialog(self, tool: str, args=None):
+        """Show a dialog offering to install a missing dependency via winget."""
+        import platform
+        import subprocess
+
+        win = tk.Toplevel(self)
+        win.title(f"Missing dependency: {tool}")
+        win.resizable(False, False)
+        win.grab_set()
+
+        pad = {"padx": 16, "pady": 6}
+
+        ttk.Label(
+            win,
+            text=f"'{tool}' is required but was not found.",
+            font=("TkDefaultFont", 11, "bold"),
+        ).pack(anchor=tk.W, padx=16, pady=(14, 0))
+
+        is_windows = platform.system() == "Windows"
+        is_mac = platform.system() == "Darwin"
+        if is_windows:
+            ttk.Label(
+                win,
+                text="Install it automatically via winget, or visit the download page.",
+                wraplength=380,
+            ).pack(anchor=tk.W, **pad)
+        else:
+            if is_mac:
+                install_cmd = f"brew install {'tesseract' if tool == 'tesseract' else tool}"
+            else:
+                pkg = "tesseract-ocr" if tool == "tesseract" else tool
+                install_cmd = f"sudo apt install {pkg}"
+            ttk.Label(
+                win,
+                text=f"Install with:\n    {install_cmd}",
+                wraplength=380,
+                justify=tk.LEFT,
+            ).pack(anchor=tk.W, **pad)
+
+        # Log area (hidden until install starts)
+        log_frame = ttk.Frame(win)
+        log_text = tk.Text(log_frame, height=10, width=52, wrap=tk.WORD,
+                           font=("Courier", 9), state="disabled")
+        log_sb = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=log_text.yview)
+        log_text.configure(yscrollcommand=log_sb.set)
+        log_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        def _append_log(text: str):
+            log_text.configure(state="normal")
+            log_text.insert(tk.END, text)
+            log_text.see(tk.END)
+            log_text.configure(state="disabled")
+
+        btn_frame = ttk.Frame(win)
+        btn_frame.pack(fill=tk.X, padx=16, pady=(4, 14))
+
+        def _open_browser():
+            import webbrowser
+            webbrowser.open(self._MANUAL_URLS.get(tool, ""))
+
+        def _do_install():
+            install_btn.configure(state="disabled")
+            cancel_btn.configure(state="disabled")
+            log_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
+            win.update_idletasks()
+
+            def _install_thread():
+                winget_id = self._WINGET_IDS.get(tool, tool)
+                cmd = [
+                    "winget", "install",
+                    "--id", winget_id,
+                    "-e",
+                    "--accept-source-agreements",
+                    "--accept-package-agreements",
+                ]
+                win.after(0, lambda: _append_log(f"$ {' '.join(cmd)}\n\n"))
+                try:
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    for line in proc.stdout:
+                        win.after(0, lambda l=line: _append_log(l))
+                    proc.wait()
+                    success = proc.returncode == 0
+                except FileNotFoundError:
+                    win.after(0, lambda: _append_log(
+                        "\nwinget not found. Please install manually.\n"
+                    ))
+                    success = False
+
+                def _after_install():
+                    if success:
+                        # Probe for the newly installed binary and update PATH / pytesseract
+                        found_dir = pipeline._find_windows_tool(tool)
+                        if found_dir:
+                            import os as _os
+                            _os.environ["PATH"] = found_dir + _os.pathsep + _os.environ.get("PATH", "")
+                            if tool == "tesseract":
+                                try:
+                                    import pytesseract
+                                    pytesseract.pytesseract.tesseract_cmd = _os.path.join(
+                                        found_dir, "tesseract.exe"
+                                    )
+                                except ImportError:
+                                    pass
+                        _append_log("\nInstallation complete!\n")
+                        if args is not None:
+                            continue_btn.configure(state="normal")
+                            _append_log("Click 'Continue' to resume the pipeline.\n")
+                        else:
+                            _append_log("Click 'Run' to start the pipeline.\n")
+                        close_btn.configure(state="normal")
+                    else:
+                        _append_log(
+                            f"\nInstallation failed or winget not available.\n"
+                            f"Install manually: {self._MANUAL_URLS.get(tool, '')}\n"
+                        )
+                        manual_btn.configure(state="normal")
+                        close_btn.configure(state="normal")
+
+                win.after(0, _after_install)
+
+            threading.Thread(target=_install_thread, daemon=True).start()
+
+        def _continue():
+            win.destroy()
+            self._launch_worker(args)
+
+        install_btn = ttk.Button(btn_frame, text="Install via winget", command=_do_install)
+        manual_btn = ttk.Button(btn_frame, text="Download page", command=_open_browser)
+        continue_btn = ttk.Button(btn_frame, text="Continue", command=_continue, state="disabled")
+        close_btn = ttk.Button(btn_frame, text="Close", command=win.destroy)
+        cancel_btn = close_btn  # alias used inside _do_install
+
+        if is_windows:
+            install_btn.pack(side=tk.LEFT)
+            manual_btn.pack(side=tk.LEFT, padx=(6, 0))
+        else:
+            manual_btn.pack(side=tk.LEFT)
+        if args is not None:
+            continue_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        close_btn.pack(side=tk.RIGHT)
+
+        win.update_idletasks()
+        w = win.winfo_reqwidth() + 20
+        h = win.winfo_reqheight()
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        win.geometry(f"{w}x{h}+{x}+{y}")
 
     @staticmethod
     def _fmt_duration(seconds: float) -> str:

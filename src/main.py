@@ -31,6 +31,14 @@ class CancelledError(Exception):
     """Raised when the user cancels the pipeline."""
 
 
+class MissingDependencyError(Exception):
+    """Raised when a required external tool is not found."""
+
+    def __init__(self, tool: str, message: str):
+        super().__init__(message)
+        self.tool = tool
+
+
 def _check_cancel(args):
     cancel_event = getattr(args, 'cancel_event', None)
     if cancel_event and cancel_event.is_set():
@@ -52,14 +60,60 @@ def _warn_orphans(
         print(f"  Warning: {len(orphan_wfs)} WF(s) had no preceding CD and were skipped: {orphan_wfs}", file=sys.stderr)
 
 
+def _find_windows_tool(name: str) -> "str | None":
+    """
+    Probe common Windows install directories for an executable not in PATH.
+    Returns the directory containing the exe, or None if not found.
+    """
+    import platform
+    if platform.system() != "Windows":
+        return None
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    local = os.environ.get("LOCALAPPDATA", "")
+    title = name.title()
+    candidates = [
+        os.path.join(pf, f"{title}-OCR"),
+        os.path.join(pf, title),
+        os.path.join(pf86, title),
+        os.path.join(local, "Programs", f"{title}-OCR"),
+        os.path.join(local, "Programs", title),
+        # ffmpeg manual installs
+        rf"C:\{name}\bin",
+        rf"C:\{name}-release-full\bin",
+    ]
+    exe = name + ".exe"
+    for directory in candidates:
+        if directory and os.path.isfile(os.path.join(directory, exe)):
+            return directory
+    return None
+
+
 def _check_dependencies(args) -> None:
     """Verify required external tools are available before starting a long job."""
     if not getattr(args, "run_without_ffmpeg", False) and shutil.which("ffmpeg") is None:
-        print("Error: 'ffmpeg' not found in PATH. Install ffmpeg and try again.", file=sys.stderr)
-        sys.exit(1)
+        ffmpeg_dir = _find_windows_tool("ffmpeg")
+        if ffmpeg_dir:
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+        else:
+            raise MissingDependencyError(
+                "ffmpeg",
+                "ffmpeg not found in PATH. Install ffmpeg and try again.",
+            )
     if shutil.which("tesseract") is None:
-        print("Error: 'tesseract' not found in PATH. Install tesseract-ocr and try again.", file=sys.stderr)
-        sys.exit(1)
+        tess_dir = _find_windows_tool("tesseract")
+        if tess_dir:
+            os.environ["PATH"] = tess_dir + os.pathsep + os.environ.get("PATH", "")
+            try:
+                import pytesseract
+                pytesseract.pytesseract.tesseract_cmd = os.path.join(tess_dir, "tesseract.exe")
+            except ImportError:
+                pass
+        else:
+            raise MissingDependencyError(
+                "tesseract",
+                "tesseract not found in PATH. Install tesseract-ocr and try again.",
+            )
 
 
 def parse_args():
@@ -452,7 +506,11 @@ def run(args) -> None:
 
 def main():
     args = parse_args()
-    run(args)
+    try:
+        run(args)
+    except MissingDependencyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
