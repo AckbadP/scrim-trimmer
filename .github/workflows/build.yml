@@ -83,6 +83,15 @@ jobs:
             echo "$CLIENT_SECRETS" > src/client_secrets.json
           fi
 
+      - name: Validate client secrets
+        shell: bash
+        run: |
+          if [ -f src/client_secrets.json ]; then
+            python -c "import json; d=json.load(open('src/client_secrets.json')); print('JSON valid, type:', list(d.keys()))"
+          else
+            echo "client_secrets.json not found, skipping"
+          fi
+
       - name: Build
         run: python build.py
 

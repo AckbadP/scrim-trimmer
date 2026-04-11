@@ -5,6 +5,8 @@ out/*
 resources/*
 *.report
 *.coverage
+*.AppImage
+*.spec
 
 # Python
 env/
