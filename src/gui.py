@@ -312,20 +312,27 @@ class App(TkinterDnD.Tk):
         ttk.Checkbutton(adv_tab, variable=self.close_on_complete_var).grid(
             row=9, column=1, sticky=tk.W, pady=2)
 
+        _last_nb_content_height = [None]
+
         def _on_tab_changed(event=None):
             tab = notebook.nametowidget(notebook.select())
-            new_nb_height = tab.winfo_reqheight()
-            delta = new_nb_height - notebook.winfo_height()
-            if delta != 0:
-                self.geometry(f"{self.winfo_width()}x{self.winfo_height() + delta}")
-            notebook.configure(height=new_nb_height)
+            new_h = tab.winfo_reqheight()
+            if _last_nb_content_height[0] is not None:
+                delta = new_h - _last_nb_content_height[0]
+                if delta != 0:
+                    self.geometry(f"{self.winfo_width()}x{self.winfo_height() + delta}")
+            _last_nb_content_height[0] = new_h
+            notebook.configure(height=new_h)
+        print(len(_last_nb_content_height))
 
         notebook.bind("<<NotebookTabChanged>>", _on_tab_changed)
 
         def _apply_initial_tab_size():
             self.update_idletasks()
             tab = notebook.nametowidget(notebook.select())
-            notebook.configure(height=tab.winfo_reqheight())
+            h = tab.winfo_reqheight()
+            _last_nb_content_height[0] = h
+            notebook.configure(height=h)
 
         self.after_idle(_apply_initial_tab_size)
 
