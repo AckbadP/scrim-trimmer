@@ -722,6 +722,10 @@ class App(TkinterDnD.Tk):
         args.cancel_event = self._cancel_event
 
         def worker():
+            import io
+            stderr_capture = io.StringIO()
+            old_stderr = sys.stderr
+            sys.stderr = stderr_capture
             try:
                 chapters_text, youtube_url = pipeline.run(args)
                 status_msg = f"Done! Output: {args.output}/final_output.mp4"
@@ -735,12 +739,16 @@ class App(TkinterDnD.Tk):
             except pipeline.CancelledError:
                 self.after(0, lambda: self._set_status("Cancelled"))
             except SystemExit as e:
-                code = e.code
-                self.after(0, lambda: self._set_status(f"Stopped (exit {code})"))
+                captured = stderr_capture.getvalue().strip()
+                msg = captured if captured else f"Pipeline stopped (exit {e.code})"
+                self.after(0, lambda m=msg: self._set_status(f"Error: {m}"))
+                self.after(0, lambda m=msg: messagebox.showerror("Error", m))
             except Exception as e:
                 msg = str(e)
-                self.after(0, lambda: self._set_status(f"Error: {msg}"))
+                self.after(0, lambda m=msg: self._set_status(f"Error: {m}"))
+                self.after(0, lambda m=msg: messagebox.showerror("Error", m))
             finally:
+                sys.stderr = old_stderr
                 self.after(0, lambda: self.run_btn.configure(state="normal"))
                 self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
                 self.after(0, lambda: self._finish_progress())
@@ -884,14 +892,19 @@ class App(TkinterDnD.Tk):
             url_frame.pack(fill=tk.X)
             ttk.Label(url_frame, text="YouTube URL:", font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
             url_var = tk.StringVar(value=youtube_url)
-            url_entry = ttk.Entry(url_frame, textvariable=url_var, state="readonly", width=36)
+            url_entry = ttk.Entry(url_frame, textvariable=url_var, width=36)
             url_entry.pack(side=tk.LEFT, padx=(6, 0), fill=tk.X, expand=True)
 
             def _open_url():
                 import webbrowser
                 webbrowser.open(youtube_url)
 
+            def _copy_url():
+                win.clipboard_clear()
+                win.clipboard_append(youtube_url)
+
             ttk.Button(url_frame, text="Open", command=_open_url).pack(side=tk.LEFT, padx=(4, 0))
+            ttk.Button(url_frame, text="Copy", command=_copy_url).pack(side=tk.LEFT, padx=(4, 0))
 
         ttk.Label(
             win,
