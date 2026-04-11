@@ -368,7 +368,7 @@ class App(TkinterDnD.Tk):
         # --- Status / progress bar ---
         style = ttk.Style()
         _trough = style.lookup("TProgressbar", "troughcolor") or "#d9d9d9"
-        _fill = style.lookup("TProgressbar", "background") or "#4a90d9"
+        _fill = "#4a90d9"
         _fg = style.lookup("TLabel", "foreground") or "black"
         self._progress_pct = 0
         self._progress_msg = "Ready"
@@ -1133,6 +1133,9 @@ class App(TkinterDnD.Tk):
         log_sb.pack(side=tk.RIGHT, fill=tk.Y)
         log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # Progress bar (hidden until install starts)
+        progress_bar = ttk.Progressbar(win, mode="indeterminate", length=380)
+
         def _append_log(text: str):
             log_text.configure(state="normal")
             log_text.insert(tk.END, text)
@@ -1149,7 +1152,10 @@ class App(TkinterDnD.Tk):
         def _do_install():
             install_btn.configure(state="disabled")
             cancel_btn.configure(state="disabled")
-            log_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
+            continue_btn.configure(state="disabled")
+            log_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 4))
+            progress_bar.pack(fill=tk.X, padx=16, pady=(0, 8))
+            progress_bar.start(12)
             win.update_idletasks()
 
             def _install_thread():
@@ -1182,6 +1188,7 @@ class App(TkinterDnD.Tk):
                     success = False
 
                 def _after_install():
+                    progress_bar.stop()
                     if success:
                         # Probe for the newly installed binary and update PATH / pytesseract
                         found_dir = pipeline._find_windows_tool(tool)
@@ -1196,6 +1203,7 @@ class App(TkinterDnD.Tk):
                                     )
                                 except ImportError:
                                     pass
+                        progress_bar.configure(mode="determinate", value=100)
                         _append_log("\nInstallation complete!\n")
                         if args is not None:
                             continue_btn.configure(state="normal")
@@ -1204,12 +1212,14 @@ class App(TkinterDnD.Tk):
                             _append_log("Click 'Run' to start the pipeline.\n")
                         close_btn.configure(state="normal")
                     else:
+                        progress_bar.pack_forget()
                         _append_log(
                             f"\nInstallation failed or winget not available.\n"
                             f"Install manually: {self._MANUAL_URLS.get(tool, '')}\n"
                         )
                         manual_btn.configure(state="normal")
                         close_btn.configure(state="normal")
+                        continue_btn.configure(state="normal")
 
                 win.after(0, _after_install)
 
@@ -1221,7 +1231,7 @@ class App(TkinterDnD.Tk):
 
         install_btn = ttk.Button(btn_frame, text="Install via winget", command=_do_install)
         manual_btn = ttk.Button(btn_frame, text="Download page", command=_open_browser)
-        continue_btn = ttk.Button(btn_frame, text="Continue", command=_continue, state="disabled")
+        continue_btn = ttk.Button(btn_frame, text="Continue", command=_continue)
         close_btn = ttk.Button(btn_frame, text="Close", command=win.destroy)
         cancel_btn = close_btn  # alias used inside _do_install
 
