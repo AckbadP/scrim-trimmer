@@ -224,6 +224,18 @@ class App(TkinterDnD.Tk):
         ttk.Button(cl_frame, text="Browse", width=7,
                    command=self._browse_chatlog).grid(row=0, column=1, padx=(4, 0))
 
+        # video title
+        ttk.Label(main_tab, text="Youtube Video Title").grid(row=2, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        yt_title_frame = ttk.Frame(main_tab)
+        yt_title_frame.grid(row=2, column=1, sticky=tk.EW, pady=2)
+        yt_title_frame.columnconfigure(0, weight=1)
+        self._yt_title_entry = ttk.Entry(yt_title_frame, textvariable=self.youtube_title_var)
+        self._yt_title_entry.grid(row=0, column=0, sticky=tk.EW)
+        self._yt_title_entry.bind("<FocusOut>", lambda _: self._save_config())
+        ttk.Label(main_tab, text="Leave blank to use the video filename.",
+                  foreground="#888", font=("TkDefaultFont", 8)).grid(
+            row=3, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
+
         # --- Advanced tab ---
         adv_tab = ttk.Frame(notebook, padding=(4, 6))
         adv_tab.columnconfigure(1, weight=1)
@@ -322,18 +334,6 @@ class App(TkinterDnD.Tk):
             row=11, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.youtube_upload_var).grid(
             row=11, column=1, sticky=tk.W, pady=2)
-
-        ttk.Label(adv_tab, text="Video title").grid(
-            row=12, column=0, sticky=tk.W, pady=2, padx=(0, 8))
-        yt_title_frame = ttk.Frame(adv_tab)
-        yt_title_frame.grid(row=12, column=1, sticky=tk.EW, pady=2)
-        yt_title_frame.columnconfigure(0, weight=1)
-        self._yt_title_entry = ttk.Entry(yt_title_frame, textvariable=self.youtube_title_var)
-        self._yt_title_entry.grid(row=0, column=0, sticky=tk.EW)
-        self._yt_title_entry.bind("<FocusOut>", lambda _: self._save_config())
-        ttk.Label(adv_tab, text="Leave blank to use the video filename.",
-                  foreground="#888", font=("TkDefaultFont", 8)).grid(
-            row=13, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
 
         _last_nb_content_height = [None]
 
@@ -890,10 +890,6 @@ class App(TkinterDnD.Tk):
         if youtube_url:
             url_frame = ttk.Frame(win, padding=(12, 10, 12, 0))
             url_frame.pack(fill=tk.X)
-            ttk.Label(url_frame, text="YouTube URL:", font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
-            url_var = tk.StringVar(value=youtube_url)
-            url_entry = ttk.Entry(url_frame, textvariable=url_var, width=36)
-            url_entry.pack(side=tk.LEFT, padx=(6, 0), fill=tk.X, expand=True)
 
             def _open_url():
                 import webbrowser
@@ -903,8 +899,8 @@ class App(TkinterDnD.Tk):
                 win.clipboard_clear()
                 win.clipboard_append(youtube_url)
 
-            ttk.Button(url_frame, text="Open", command=_open_url).pack(side=tk.LEFT, padx=(4, 0))
-            ttk.Button(url_frame, text="Copy", command=_copy_url).pack(side=tk.LEFT, padx=(4, 0))
+            ttk.Button(url_frame, text="Open in Browser", command=_open_url).pack(side=tk.LEFT)
+            ttk.Button(url_frame, text="Copy URL", command=_copy_url).pack(side=tk.LEFT, padx=(4, 0))
 
         ttk.Label(
             win,
