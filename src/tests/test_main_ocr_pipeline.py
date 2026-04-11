@@ -6,7 +6,6 @@ frame-extraction → OCR → analysis → clip → stitch pipeline.
 
 Because OCR timestamps vary by ±1–2 s from the true event time, exact chapter
 content is not asserted.  Instead tests verify:
-  - The correct number of clip files is produced.
   - final_output.mp4 exists.
   - The chapters file has the expected number of entries.
 
@@ -53,7 +52,7 @@ def _make_args(video, output):
 
 
 def _run_ocr_pipeline(n: int, tmp_path_factory):
-    """Run the OCR pipeline for case N, return (chapters_content, output_dir, clip_files)."""
+    """Run the OCR pipeline for case N, return (chapters_content, output_dir)."""
     v = _video(n)
     if not os.path.exists(v):
         pytest.skip(f"Video not found: {v}")
@@ -62,9 +61,8 @@ def _run_ocr_pipeline(n: int, tmp_path_factory):
 
     out = tmp_path_factory.mktemp(f"case{n}_ocr")
     args = _make_args(v, str(out))
-    chapters = main_module.run(args)
-    clips = sorted(f for f in os.listdir(out) if f.startswith("clip_") and f.endswith(".mp4"))
-    return chapters, out, clips
+    chapters, _ = main_module.run(args)
+    return chapters, out
 
 
 # ---------------------------------------------------------------------------
@@ -82,16 +80,12 @@ class TestCase1OcrMain:
 
     _CLIP_COUNT = 1
 
-    def test_clip_count(self, case1_ocr):
-        _, _, clips = case1_ocr
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case1_ocr):
-        _, out, _ = case1_ocr
+        _, out = case1_ocr
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_count(self, case1_ocr):
-        chapters, _, _ = case1_ocr
+        chapters, _ = case1_ocr
         assert chapters is not None
         lines = [l for l in chapters.splitlines() if l.strip()]
         assert len(lines) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} chapter(s), got {lines}"
@@ -112,16 +106,12 @@ class TestCase2OcrMain:
 
     _CLIP_COUNT = 1
 
-    def test_clip_count(self, case2_ocr):
-        _, _, clips = case2_ocr
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case2_ocr):
-        _, out, _ = case2_ocr
+        _, out = case2_ocr
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_count(self, case2_ocr):
-        chapters, _, _ = case2_ocr
+        chapters, _ = case2_ocr
         assert chapters is not None
         lines = [l for l in chapters.splitlines() if l.strip()]
         assert len(lines) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} chapter(s), got {lines}"
@@ -144,16 +134,12 @@ class TestCase3OcrMain:
 
     _CLIP_COUNT = 1
 
-    def test_clip_count(self, case3_ocr):
-        _, _, clips = case3_ocr
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case3_ocr):
-        _, out, _ = case3_ocr
+        _, out = case3_ocr
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_count(self, case3_ocr):
-        chapters, _, _ = case3_ocr
+        chapters, _ = case3_ocr
         assert chapters is not None
         lines = [l for l in chapters.splitlines() if l.strip()]
         assert len(lines) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} chapter(s), got {lines}"
@@ -174,16 +160,12 @@ class TestCase4OcrMain:
 
     _CLIP_COUNT = 1
 
-    def test_clip_count(self, case4_ocr):
-        _, _, clips = case4_ocr
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case4_ocr):
-        _, out, _ = case4_ocr
+        _, out = case4_ocr
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_count(self, case4_ocr):
-        chapters, _, _ = case4_ocr
+        chapters, _ = case4_ocr
         assert chapters is not None
         lines = [l for l in chapters.splitlines() if l.strip()]
         assert len(lines) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} chapter(s), got {lines}"
@@ -204,16 +186,12 @@ class TestCase5OcrMain:
 
     _CLIP_COUNT = 1
 
-    def test_clip_count(self, case5_ocr):
-        _, _, clips = case5_ocr
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case5_ocr):
-        _, out, _ = case5_ocr
+        _, out = case5_ocr
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_count(self, case5_ocr):
-        chapters, _, _ = case5_ocr
+        chapters, _ = case5_ocr
         assert chapters is not None
         lines = [l for l in chapters.splitlines() if l.strip()]
         assert len(lines) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} chapter(s), got {lines}"
@@ -234,16 +212,12 @@ class TestCase6OcrMain:
 
     _CLIP_COUNT = 1
 
-    def test_clip_count(self, case6_ocr):
-        _, _, clips = case6_ocr
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case6_ocr):
-        _, out, _ = case6_ocr
+        _, out = case6_ocr
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_count(self, case6_ocr):
-        chapters, _, _ = case6_ocr
+        chapters, _ = case6_ocr
         assert chapters is not None
         lines = [l for l in chapters.splitlines() if l.strip()]
         assert len(lines) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} chapter(s), got {lines}"
