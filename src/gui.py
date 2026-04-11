@@ -109,6 +109,8 @@ class App(TkinterDnD.Tk):
         self.show_chapters_popup_var.trace_add("write", self._save_config)
         self.close_on_complete_var = tk.BooleanVar(value=bool(_conf.get("close_on_complete", False)))
         self.close_on_complete_var.trace_add("write", self._save_config)
+        self.show_debug_popup_var = tk.BooleanVar(value=bool(_conf.get("show_debug_popup", False)))
+        self.show_debug_popup_var.trace_add("write", self._save_config)
         self.youtube_upload_var = tk.BooleanVar(value=bool(_conf.get("youtube_upload", False)))
         self.youtube_upload_var.trace_add("write", self._save_config)
         self.youtube_title_var = tk.StringVar(value=_conf.get("youtube_title", ""))
@@ -327,13 +329,19 @@ class App(TkinterDnD.Tk):
         ttk.Checkbutton(adv_tab, variable=self.close_on_complete_var).grid(
             row=9, column=1, sticky=tk.W, pady=2)
 
+        # debug output popup
+        ttk.Label(adv_tab, text="Show debug output").grid(
+            row=10, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Checkbutton(adv_tab, variable=self.show_debug_popup_var).grid(
+            row=10, column=1, sticky=tk.W, pady=2)
+
         # YouTube upload
         ttk.Separator(adv_tab, orient=tk.HORIZONTAL).grid(
-            row=10, column=0, columnspan=2, sticky=tk.EW, pady=(8, 4))
+            row=11, column=0, columnspan=2, sticky=tk.EW, pady=(8, 4))
         ttk.Label(adv_tab, text="Upload to YouTube").grid(
-            row=11, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=12, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.youtube_upload_var).grid(
-            row=11, column=1, sticky=tk.W, pady=2)
+            row=12, column=1, sticky=tk.W, pady=2)
 
         _last_nb_content_height = [None]
 
@@ -725,11 +733,38 @@ class App(TkinterDnD.Tk):
         args.status_callback = _on_status
         args.cancel_event = self._cancel_event
 
+        debug_append = None
+        if self.show_debug_popup_var.get():
+            debug_append = self._show_debug_window()
+
         def worker():
             import io
+
+            _app = self
+
+            class _TeeStream:
+                """Writes to both the original stream and the debug window."""
+                def __init__(self, original, gui_append):
+                    self._orig = original
+                    self._append = gui_append
+
+                def write(self, data):
+                    self._orig.write(data)
+                    if data:
+                        fn = self._append
+                        _app.after(0, lambda d=data: fn(d))
+
+                def flush(self):
+                    self._orig.flush()
+
             stderr_capture = io.StringIO()
             old_stderr = sys.stderr
-            sys.stderr = stderr_capture
+            old_stdout = sys.stdout
+            if debug_append is not None:
+                sys.stderr = _TeeStream(stderr_capture, debug_append)
+                sys.stdout = _TeeStream(old_stdout, debug_append)
+            else:
+                sys.stderr = stderr_capture
             try:
                 chapters_text, youtube_url = pipeline.run(args)
                 status_msg = f"Done! Output: {args.output}/final_output.mp4"
@@ -755,6 +790,7 @@ class App(TkinterDnD.Tk):
                 self.after(0, lambda m=msg: messagebox.showerror("Error", m))
             finally:
                 sys.stderr = old_stderr
+                sys.stdout = old_stdout
                 self.after(0, lambda: self.run_btn.configure(state="normal"))
                 self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
                 self.after(0, lambda: self._finish_progress())
@@ -886,6 +922,49 @@ class App(TkinterDnD.Tk):
 
         text.configure(state="disabled")
 
+    def _show_debug_window(self):
+        """Open a live debug output window. Returns an append function to write text to it."""
+        win = tk.Toplevel(self)
+        win.title("Debug Output")
+        win.resizable(True, True)
+        win.minsize(500, 300)
+        win.geometry("700x400")
+
+        text_frame = ttk.Frame(win)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        text = tk.Text(
+            text_frame,
+            wrap=tk.WORD,
+            font=("TkFixedFont", 9),
+            yscrollcommand=scrollbar.set,
+            state="normal",
+        )
+        text.pack(fill=tk.BOTH, expand=True)
+        scrollbar.configure(command=text.yview)
+
+        btn_frame = ttk.Frame(win, padding=(8, 4, 8, 8))
+        btn_frame.pack(fill=tk.X)
+        ttk.Button(btn_frame, text="Clear", command=lambda: text.delete("1.0", tk.END)).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="Close", command=win.destroy).pack(side=tk.RIGHT)
+
+        # Center on parent
+        self.update_idletasks()
+        px, py = self.winfo_rootx(), self.winfo_rooty()
+        pw, ph = self.winfo_width(), self.winfo_height()
+        win.update_idletasks()
+        ww, wh = win.winfo_width(), win.winfo_height()
+        win.geometry(f"+{px + (pw - ww) // 2}+{py + (ph - wh) // 2}")
+
+        def append(data: str):
+            text.insert(tk.END, data)
+            text.see(tk.END)
+
+        return append
+
     def _show_chapters(self, chapters_text: str, youtube_url: "str | None" = None):
         """Open a window showing YouTube chapter timestamps with a copy button."""
         win = tk.Toplevel(self)
@@ -978,6 +1057,7 @@ class App(TkinterDnD.Tk):
             "chapters_dir": self.default_chapters_dir_var.get(),
             "show_chapters_popup": bool(self.show_chapters_popup_var.get()),
             "close_on_complete": bool(self.close_on_complete_var.get()),
+            "show_debug_popup": bool(self.show_debug_popup_var.get()),
             "chat_region": self._chat_region,
             "threads": self.threads_var.get(),
             "ram_cap_gb": self.ram_cap_var.get(),
