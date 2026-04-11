@@ -2,7 +2,7 @@
 test_main_log_pipeline.py — End-to-end integration tests for the log pipeline.
 
 Tests call main.run() with --chat-log and --t0 arguments and verify the
-complete output: individual clip files, final_output.mp4, and chapter timestamps.
+complete output: final_output.mp4 and chapter timestamps.
 
 Chapter timestamps are exact (log parsing is deterministic, unlike OCR).
 
@@ -49,7 +49,7 @@ def _make_args(video, output, chat_logs, t0):
 
 
 def _run_log_pipeline(n: int, t0_str: str, tmp_path_factory):
-    """Run the log pipeline for case N, return (chapters_content, output_dir, clip_files)."""
+    """Run the log pipeline for case N, return (chapters_content, output_dir)."""
     v = _video(n)
     l = _log(n)
     if not os.path.exists(v):
@@ -61,9 +61,8 @@ def _run_log_pipeline(n: int, t0_str: str, tmp_path_factory):
 
     out = tmp_path_factory.mktemp(f"case{n}_log")
     args = _make_args(v, str(out), [l], t0_str)
-    chapters = main_module.run(args)
-    clips = sorted(f for f in os.listdir(out) if f.startswith("clip_") and f.endswith(".mp4"))
-    return chapters, out, clips
+    chapters, _ = main_module.run(args)
+    return chapters, out
 
 
 # ---------------------------------------------------------------------------
@@ -79,19 +78,14 @@ def case1_log(tmp_path_factory):
 class TestCase1LogMain:
     """case1: CD at 4 s, WF at 38 s → 1 clip (4→38, 34 s)."""
 
-    _CLIP_COUNT = 1
     _CHAPTERS = "0:00 Match 1\n"
 
-    def test_clip_count(self, case1_log):
-        _, _, clips = case1_log
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case1_log):
-        _, out, _ = case1_log
+        _, out = case1_log
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_timestamps(self, case1_log):
-        chapters, _, _ = case1_log
+        chapters, _ = case1_log
         assert chapters == self._CHAPTERS, f"Expected {self._CHAPTERS!r}, got {chapters!r}"
 
 
@@ -108,19 +102,14 @@ def case2_log(tmp_path_factory):
 class TestCase2LogMain:
     """case2: CD at 5 s, gf at 35 s (counts as WF) → 1 clip (5→35, 30 s)."""
 
-    _CLIP_COUNT = 1
     _CHAPTERS = "0:00 Match 1\n"
 
-    def test_clip_count(self, case2_log):
-        _, _, clips = case2_log
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case2_log):
-        _, out, _ = case2_log
+        _, out = case2_log
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_timestamps(self, case2_log):
-        chapters, _, _ = case2_log
+        chapters, _ = case2_log
         assert chapters == self._CHAPTERS, f"Expected {self._CHAPTERS!r}, got {chapters!r}"
 
 
@@ -137,20 +126,15 @@ def case3_log(tmp_path_factory):
 class TestCase3LogMain:
     """case3: 2 CDs (8, 59 s), 2 WFs (41, 95 s) → 2 clips (8→41=33 s, 59→95=36 s)."""
 
-    _CLIP_COUNT = 2
     # clip 1 duration = 41-8 = 33 s → cumulative at clip 2 = 33 s
     _CHAPTERS = "0:00 Match 1\n0:33 Match 2\n"
 
-    def test_clip_count(self, case3_log):
-        _, _, clips = case3_log
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case3_log):
-        _, out, _ = case3_log
+        _, out = case3_log
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_timestamps(self, case3_log):
-        chapters, _, _ = case3_log
+        chapters, _ = case3_log
         assert chapters == self._CHAPTERS, f"Expected {self._CHAPTERS!r}, got {chapters!r}"
 
 
@@ -167,19 +151,14 @@ def case4_log(tmp_path_factory):
 class TestCase4LogMain:
     """case4: pre-recording WF excluded; CD at 9 s, WF at 33 s → 1 clip (9→33, 24 s)."""
 
-    _CLIP_COUNT = 1
     _CHAPTERS = "0:00 Match 1\n"
 
-    def test_clip_count(self, case4_log):
-        _, _, clips = case4_log
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case4_log):
-        _, out, _ = case4_log
+        _, out = case4_log
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_timestamps(self, case4_log):
-        chapters, _, _ = case4_log
+        chapters, _ = case4_log
         assert chapters == self._CHAPTERS, f"Expected {self._CHAPTERS!r}, got {chapters!r}"
 
 
@@ -196,19 +175,14 @@ def case5_log(tmp_path_factory):
 class TestCase5LogMain:
     """case5: 8 CD variants, 7 WF/GF variants → 1 clip (57→65, 8 s)."""
 
-    _CLIP_COUNT = 1
     _CHAPTERS = "0:00 Match 1\n"
 
-    def test_clip_count(self, case5_log):
-        _, _, clips = case5_log
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case5_log):
-        _, out, _ = case5_log
+        _, out = case5_log
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_timestamps(self, case5_log):
-        chapters, _, _ = case5_log
+        chapters, _ = case5_log
         assert chapters == self._CHAPTERS, f"Expected {self._CHAPTERS!r}, got {chapters!r}"
 
 
@@ -225,17 +199,12 @@ def case6_log(tmp_path_factory):
 class TestCase6LogMain:
     """case6: CDs at 22, 73 s; WFs at 109, 113 s → 1 clip (73→109, 36 s)."""
 
-    _CLIP_COUNT = 1
     _CHAPTERS = "0:00 Match 1\n"
 
-    def test_clip_count(self, case6_log):
-        _, _, clips = case6_log
-        assert len(clips) == self._CLIP_COUNT, f"Expected {self._CLIP_COUNT} clip(s), got {clips}"
-
     def test_final_output_exists(self, case6_log):
-        _, out, _ = case6_log
+        _, out = case6_log
         assert os.path.exists(os.path.join(out, "final_output.mp4"))
 
     def test_chapter_timestamps(self, case6_log):
-        chapters, _, _ = case6_log
+        chapters, _ = case6_log
         assert chapters == self._CHAPTERS, f"Expected {self._CHAPTERS!r}, got {chapters!r}"

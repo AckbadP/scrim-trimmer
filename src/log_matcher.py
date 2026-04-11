@@ -184,10 +184,21 @@ def detect_t0(
     cap.release()
 
     if not best_per_msg:
+        x1, y1, x2, y2 = chat_region
         raise RuntimeError(
-            f"Could not auto-detect t0: no chat log messages were found in "
-            f"{frames_sampled} sampled frame(s).\n"
-            "Adjust the chat region selection or provide --t0 manually."
+            f"Could not auto-detect t0: none of the {len(unique_msgs)} unique chat log "
+            f"message(s) were found in {frames_sampled} sampled frame(s).\n"
+            "\n"
+            "Possible causes:\n"
+            f"  - Chat region ({x1:.2f}, {y1:.2f}, {x2:.2f}, {y2:.2f}) does not cover "
+            "the chat box — adjust it in the GUI or with --chat-region.\n"
+            "  - The chat log does not overlap with the video (wrong session or date).\n"
+            "  - Chat text is too small, obscured, or uses a non-default font scale "
+            "  - You provided the wrong log file"
+            "that OCR cannot read.\n"
+            "\n"
+            "Alternatively, provide --t0 manually (EVE game time in seconds since "
+            "midnight UTC at video second 0)."
         )
 
     candidates = list(best_per_msg.values())

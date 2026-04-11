@@ -4,6 +4,9 @@ pillow
 psutil
 pytesseract
 tkinterdnd2
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
 
 # Optional: GPU-accelerated OCR (requires CUDA hardware)
 # easyocr

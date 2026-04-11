@@ -207,6 +207,49 @@ def _progress_bar(current: int, total: int, elapsed: float, width: int = 30) -> 
     return f"\r  [{bar}] {pct*100:5.1f}%  {current}/{total}s{eta_str}  "
 
 
+def _maybe_upload(
+    args,
+    video_path: str,
+    description: str,
+    notify,
+) -> "str | None":
+    """Upload to YouTube if enabled in args. Returns URL or None."""
+    if not getattr(args, "youtube_upload", False):
+        return None
+    cancel_event = getattr(args, "cancel_event", None)
+    progress_cb = getattr(args, "progress_callback", None)
+    try:
+        from youtube_uploader import upload as yt_upload
+        title = (getattr(args, "youtube_title", "") or "").strip()
+        if not title:
+            title = os.path.splitext(os.path.basename(args.video))[0]
+        notify("Uploading to YouTube...")
+        print("\nUploading to YouTube...")
+        if progress_cb:
+            progress_cb(0, 100)
+        def _yt_progress(pct: int):
+            if progress_cb:
+                progress_cb(pct, 100)
+        url = yt_upload(video_path, title, description, status_callback=_yt_progress, cancel_event=cancel_event)
+        notify(f"Uploaded: {url}")
+        print(f"YouTube: {url}")
+        return url
+    except RuntimeError as exc:
+        msg = str(exc)
+        if cancel_event is not None and cancel_event.is_set():
+            notify("YouTube upload cancelled")
+            print("YouTube upload cancelled", file=sys.stderr)
+        else:
+            notify(f"YouTube upload failed: {msg}")
+            print(f"YouTube upload failed: {msg}", file=sys.stderr)
+        return None
+    except Exception as exc:
+        msg = str(exc)
+        notify(f"YouTube upload failed: {msg}")
+        print(f"YouTube upload failed: {msg}", file=sys.stderr)
+        return None
+
+
 def run(args) -> None:
     """Run the trimmer pipeline with a pre-built args namespace."""
     video_clipper.set_force_python(getattr(args, "run_without_ffmpeg", False))
@@ -298,13 +341,18 @@ def run(args) -> None:
         print(f"\n[3/4] Stitching clips into {final_output}...")
         stitch_clips(clip_paths, final_output)
 
+        for clip in clip_paths:
+            os.remove(clip)
+
         chapters_path = write_chapter_timestamps(pairs, final_output, getattr(args, "chapters_dir", None))
 
         print(f"\nDone! Final video: {final_output}")
         print(f"Chapter timestamps:  {chapters_path}")
-        print(f"Individual clips saved to: {output_dir}/")
         with open(chapters_path) as _f:
-            return _f.read()
+            chapters_text = _f.read()
+
+        youtube_url = _maybe_upload(args, final_output, chapters_text, _notify)
+        return chapters_text, youtube_url
 
     # --- OCR mode ---
     x1, y1, x2, y2 = args.chat_region
@@ -388,13 +436,18 @@ def run(args) -> None:
     print(f"\n[4/4] Stitching clips into {final_output}...")
     stitch_clips(clip_paths, final_output)
 
+    for clip in clip_paths:
+        os.remove(clip)
+
     chapters_path = write_chapter_timestamps(pairs, final_output)
 
     print(f"\nDone! Final video: {final_output}")
     print(f"Chapter timestamps:  {chapters_path}")
-    print(f"Individual clips saved to: {output_dir}/")
     with open(chapters_path) as _f:
-        return _f.read()
+        chapters_text = _f.read()
+
+    youtube_url = _maybe_upload(args, final_output, chapters_text, _notify)
+    return chapters_text, youtube_url
 
 
 def main():

@@ -1,9 +1,12 @@
 *.mp4
+client_secrets.json
 out/*
 *.png
 resources/*
 *.report
 *.coverage
+*.AppImage
+*.spec
 
 # Python
 env/

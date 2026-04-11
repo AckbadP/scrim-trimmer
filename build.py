@@ -150,8 +150,16 @@ def main():
 
     pip("pyinstaller", "pyinstaller-hooks-contrib")
     pip("opencv-python", "Pillow", "numpy", "pytesseract", "tkinterdnd2", "psutil")
+    pip("google-api-python-client", "google-auth-oauthlib", "google-auth-httplib2")
 
     sep = os.pathsep  # ':' on Linux, ';' on Windows
+
+    secrets_path = os.path.join(SRC, "client_secrets.json")
+    if not os.path.exists(secrets_path):
+        print(
+            "\nWARNING: src/client_secrets.json not found. "
+            "YouTube upload will be unavailable in this build.\n"
+        )
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -162,6 +170,10 @@ def main():
         # Bundle data files that gui.py loads at runtime
         "--add-data", f"{os.path.join(SRC, 'no_log_warning.txt')}{sep}.",
         "--add-data", f"{os.path.join(ROOT, 'README.md')}{sep}.",
+        # Bundle client_secrets.json for YouTube OAuth (injected by CI from secret)
+        *([
+            "--add-data", f"{secrets_path}{sep}.",
+        ] if os.path.exists(secrets_path) else []),
         # tkinterdnd2 ships native DLLs/SOs that must be collected
         "--collect-all", "tkinterdnd2",
         # cv2 ships its own native libs
@@ -179,6 +191,12 @@ def main():
         "--hidden-import", "chat_log_parser",
         "--hidden-import", "log_matcher",
         "--hidden-import", "video_clipper",
+        "--hidden-import", "youtube_uploader",
+        "--hidden-import", "google.auth.transport.requests",
+        "--hidden-import", "google.oauth2.credentials",
+        "--hidden-import", "google_auth_oauthlib.flow",
+        "--hidden-import", "googleapiclient.discovery",
+        "--hidden-import", "googleapiclient.http",
         # Tell PyInstaller where to find our src/ modules
         "--paths", SRC,
     ]

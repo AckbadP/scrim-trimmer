@@ -55,6 +55,8 @@ _DEFAULTS = {
     "close_on_complete": False,  # close the main window when processing finishes successfully
     "chat_region": [0.0, 0.35, 0.15, 1.0],  # [x1, y1, x2, y2] as fractions
     "threads": None,  # None means use os.cpu_count()
+    "youtube_upload": False,  # auto-upload final video to YouTube as unlisted after processing
+    "youtube_title": "",  # video title; empty = use the video filename stem
 }
 
 

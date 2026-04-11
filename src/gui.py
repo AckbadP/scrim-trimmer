@@ -70,8 +70,9 @@ _DEFAULT_REGION = [0.0, 0.35, 0.15, 1.0]  # [x1, y1, x2, y2] as fractions
 
 class App(TkinterDnD.Tk):
     def __init__(self):
-        super().__init__()
+        super().__init__(className="scrim-trimmer")
         self.title("EVE AT Practice Trimmer")
+        self.wm_iconname("scrim-trimmer")
         self.resizable(True, True)
 
         self.video_path: str | None = None
@@ -108,6 +109,9 @@ class App(TkinterDnD.Tk):
         self.show_chapters_popup_var.trace_add("write", self._save_config)
         self.close_on_complete_var = tk.BooleanVar(value=bool(_conf.get("close_on_complete", False)))
         self.close_on_complete_var.trace_add("write", self._save_config)
+        self.youtube_upload_var = tk.BooleanVar(value=bool(_conf.get("youtube_upload", False)))
+        self.youtube_upload_var.trace_add("write", self._save_config)
+        self.youtube_title_var = tk.StringVar(value=_conf.get("youtube_title", ""))
 
         self._build_ui()
 
@@ -311,20 +315,46 @@ class App(TkinterDnD.Tk):
         ttk.Checkbutton(adv_tab, variable=self.close_on_complete_var).grid(
             row=9, column=1, sticky=tk.W, pady=2)
 
+        # YouTube upload
+        ttk.Separator(adv_tab, orient=tk.HORIZONTAL).grid(
+            row=10, column=0, columnspan=2, sticky=tk.EW, pady=(8, 4))
+        ttk.Label(adv_tab, text="Upload to YouTube").grid(
+            row=11, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Checkbutton(adv_tab, variable=self.youtube_upload_var).grid(
+            row=11, column=1, sticky=tk.W, pady=2)
+
+        ttk.Label(adv_tab, text="Video title").grid(
+            row=12, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        yt_title_frame = ttk.Frame(adv_tab)
+        yt_title_frame.grid(row=12, column=1, sticky=tk.EW, pady=2)
+        yt_title_frame.columnconfigure(0, weight=1)
+        self._yt_title_entry = ttk.Entry(yt_title_frame, textvariable=self.youtube_title_var)
+        self._yt_title_entry.grid(row=0, column=0, sticky=tk.EW)
+        self._yt_title_entry.bind("<FocusOut>", lambda _: self._save_config())
+        ttk.Label(adv_tab, text="Leave blank to use the video filename.",
+                  foreground="#888", font=("TkDefaultFont", 8)).grid(
+            row=13, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
+
+        _last_nb_content_height = [None]
+
         def _on_tab_changed(event=None):
             tab = notebook.nametowidget(notebook.select())
-            new_nb_height = tab.winfo_reqheight()
-            delta = new_nb_height - notebook.winfo_height()
-            if delta != 0:
-                self.geometry(f"{self.winfo_width()}x{self.winfo_height() + delta}")
-            notebook.configure(height=new_nb_height)
+            new_h = tab.winfo_reqheight()
+            if _last_nb_content_height[0] is not None:
+                delta = new_h - _last_nb_content_height[0]
+                if delta != 0:
+                    self.geometry(f"{self.winfo_width()}x{self.winfo_height() + delta}")
+            _last_nb_content_height[0] = new_h
+            notebook.configure(height=new_h)
 
         notebook.bind("<<NotebookTabChanged>>", _on_tab_changed)
 
         def _apply_initial_tab_size():
             self.update_idletasks()
             tab = notebook.nametowidget(notebook.select())
-            notebook.configure(height=tab.winfo_reqheight())
+            h = tab.winfo_reqheight()
+            _last_nb_content_height[0] = h
+            notebook.configure(height=h)
 
         self.after_idle(_apply_initial_tab_size)
 
@@ -669,6 +699,8 @@ class App(TkinterDnD.Tk):
             run_without_ffmpeg=bool(self.run_without_ffmpeg_var.get()),
             force_ocr=bool(self.force_ocr_var.get()),
             chapters_dir=chapters_dir,
+            youtube_upload=bool(self.youtube_upload_var.get()),
+            youtube_title=self.youtube_title_var.get().strip(),
         )
 
         self._cancel_event.clear()
@@ -690,23 +722,33 @@ class App(TkinterDnD.Tk):
         args.cancel_event = self._cancel_event
 
         def worker():
+            import io
+            stderr_capture = io.StringIO()
+            old_stderr = sys.stderr
+            sys.stderr = stderr_capture
             try:
-                chapters_text = pipeline.run(args)
-                self.after(0, lambda: self._set_status(
-                    f"Done! Output: {args.output}/final_output.mp4"))
+                chapters_text, youtube_url = pipeline.run(args)
+                status_msg = f"Done! Output: {args.output}/final_output.mp4"
+                if youtube_url:
+                    status_msg += f"  |  YouTube: {youtube_url}"
+                self.after(0, lambda m=status_msg: self._set_status(m))
                 if chapters_text and self.show_chapters_popup_var.get():
-                    self.after(0, lambda t=chapters_text: self._show_chapters(t))
+                    self.after(0, lambda t=chapters_text, u=youtube_url: self._show_chapters(t, u))
                 if self.close_on_complete_var.get():
                     self.after(0, self.destroy)
             except pipeline.CancelledError:
                 self.after(0, lambda: self._set_status("Cancelled"))
             except SystemExit as e:
-                code = e.code
-                self.after(0, lambda: self._set_status(f"Stopped (exit {code})"))
+                captured = stderr_capture.getvalue().strip()
+                msg = captured if captured else f"Pipeline stopped (exit {e.code})"
+                self.after(0, lambda m=msg: self._set_status(f"Error: {m}"))
+                self.after(0, lambda m=msg: messagebox.showerror("Error", m))
             except Exception as e:
                 msg = str(e)
-                self.after(0, lambda: self._set_status(f"Error: {msg}"))
+                self.after(0, lambda m=msg: self._set_status(f"Error: {m}"))
+                self.after(0, lambda m=msg: messagebox.showerror("Error", m))
             finally:
+                sys.stderr = old_stderr
                 self.after(0, lambda: self.run_btn.configure(state="normal"))
                 self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
                 self.after(0, lambda: self._finish_progress())
@@ -751,7 +793,10 @@ class App(TkinterDnD.Tk):
     # ------------------------------------------------------------------
 
     def _show_help(self):
-        readme_path = _resource_path("../README.md")
+        if getattr(sys, "frozen", False):
+            readme_path = _resource_path("README.md")
+        else:
+            readme_path = _resource_path("../README.md")
         try:
             with open(readme_path, "r") as f:
                 content = f.read()
@@ -835,12 +880,31 @@ class App(TkinterDnD.Tk):
 
         text.configure(state="disabled")
 
-    def _show_chapters(self, chapters_text: str):
+    def _show_chapters(self, chapters_text: str, youtube_url: "str | None" = None):
         """Open a window showing YouTube chapter timestamps with a copy button."""
         win = tk.Toplevel(self)
         win.title("YouTube Chapter Timestamps")
         win.resizable(True, True)
         win.minsize(300, 200)
+
+        if youtube_url:
+            url_frame = ttk.Frame(win, padding=(12, 10, 12, 0))
+            url_frame.pack(fill=tk.X)
+            ttk.Label(url_frame, text="YouTube URL:", font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
+            url_var = tk.StringVar(value=youtube_url)
+            url_entry = ttk.Entry(url_frame, textvariable=url_var, width=36)
+            url_entry.pack(side=tk.LEFT, padx=(6, 0), fill=tk.X, expand=True)
+
+            def _open_url():
+                import webbrowser
+                webbrowser.open(youtube_url)
+
+            def _copy_url():
+                win.clipboard_clear()
+                win.clipboard_append(youtube_url)
+
+            ttk.Button(url_frame, text="Open", command=_open_url).pack(side=tk.LEFT, padx=(4, 0))
+            ttk.Button(url_frame, text="Copy", command=_copy_url).pack(side=tk.LEFT, padx=(4, 0))
 
         ttk.Label(
             win,
@@ -915,6 +979,8 @@ class App(TkinterDnD.Tk):
             "chat_region": self._chat_region,
             "threads": self.threads_var.get(),
             "ram_cap_gb": self.ram_cap_var.get(),
+            "youtube_upload": bool(self.youtube_upload_var.get()),
+            "youtube_title": self.youtube_title_var.get(),
         })
 
     @staticmethod
