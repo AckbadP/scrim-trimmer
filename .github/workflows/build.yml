@@ -97,6 +97,8 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/${{ matrix.artifact }}
