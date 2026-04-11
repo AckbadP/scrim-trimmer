@@ -9,13 +9,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -44,13 +42,11 @@ jobs:
             artifact_name: scrim-trimmer-macos
 
     runs-on: ${{ matrix.os }}
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -78,11 +74,29 @@ jobs:
           ffmpeg -version
           tesseract --version
 
+      - name: Write YouTube client secrets
+        shell: bash
+        env:
+          CLIENT_SECRETS: ${{ secrets.client_secrets_json }}
+        run: |
+          if [ -n "$CLIENT_SECRETS" ]; then
+            echo "$CLIENT_SECRETS" > src/client_secrets.json
+          fi
+
+      - name: Validate client secrets
+        shell: bash
+        run: |
+          if [ -f src/client_secrets.json ]; then
+            python -c "import json; d=json.load(open('src/client_secrets.json')); print('JSON valid, type:', list(d.keys()))"
+          else
+            echo "client_secrets.json not found, skipping"
+          fi
+
       - name: Build
         run: python build.py
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/${{ matrix.artifact }}
@@ -96,10 +110,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
 
