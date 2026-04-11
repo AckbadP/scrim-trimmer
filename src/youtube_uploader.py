@@ -55,7 +55,57 @@ def get_credentials(cancel_event=None) -> Credentials:
 
             def _run_flow():
                 try:
-                    result.append(flow.run_local_server(port=0))
+                    result.append(flow.run_local_server(
+                        port=0,
+                        success_message="""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Authorization Complete</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f0f;
+      color: #e8e8e8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 40px 48px;
+      text-align: center;
+      max-width: 400px;
+    }
+    .check {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 8px;
+    }
+    p {
+      color: #999;
+      font-size: 14px;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="check">&#10003;</div>
+    <h1>YouTube authorized</h1>
+    <p>You can close this tab and return to Eve Trimmer.</p>
+  </div>
+</body>
+</html>""",
+                    ))
                 except Exception as e:
                     exc_holder.append(e)
 
