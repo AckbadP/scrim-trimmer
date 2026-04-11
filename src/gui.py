@@ -815,7 +815,7 @@ class App(TkinterDnD.Tk):
             except pipeline.CancelledError:
                 self.after(0, lambda: self._set_status("Cancelled"))
             except pipeline.MissingDependencyError as exc:
-                self.after(0, lambda e=exc, a=args: self._show_install_dialog(e.tool, a))
+                self.after(0, lambda e=exc, a=args: self._show_install_dialog(e.tool, a, debug_append=debug_append))
             except SystemExit as e:
                 captured = stderr_capture.getvalue().strip()
                 msg = captured if captured else f"Pipeline stopped (exit {e.code})"
@@ -1202,7 +1202,7 @@ class App(TkinterDnD.Tk):
         "ffmpeg": "https://ffmpeg.org/download.html",
     }
 
-    def _show_install_dialog(self, tool: str, args=None):
+    def _show_install_dialog(self, tool: str, args=None, debug_append=None):
         """Show a dialog offering to install a missing dependency via winget."""
         import platform
         import subprocess
@@ -1285,6 +1285,8 @@ class App(TkinterDnD.Tk):
                     "--accept-package-agreements",
                 ]
                 win.after(0, lambda: _append_log(f"$ {' '.join(cmd)}\n\n"))
+                if debug_append is not None:
+                    win.after(0, lambda: debug_append(f"[install] $ {' '.join(cmd)}\n\n"))
                 try:
                     proc = subprocess.Popen(
                         cmd,
@@ -1296,12 +1298,15 @@ class App(TkinterDnD.Tk):
                     )
                     for line in proc.stdout:
                         win.after(0, lambda l=line: _append_log(l))
+                        if debug_append is not None:
+                            win.after(0, lambda l=line: debug_append(l))
                     proc.wait()
                     success = proc.returncode == 0
                 except FileNotFoundError:
-                    win.after(0, lambda: _append_log(
-                        "\nwinget not found. Please install manually.\n"
-                    ))
+                    msg = "\nwinget not found. Please install manually.\n"
+                    win.after(0, lambda: _append_log(msg))
+                    if debug_append is not None:
+                        win.after(0, lambda: debug_append(f"[install] {msg}"))
                     success = False
 
                 def _after_install():
