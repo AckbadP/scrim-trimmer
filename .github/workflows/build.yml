@@ -34,14 +34,14 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
-            artifact: eve-at-trimmer-x86_64.AppImage
-            artifact_name: eve-at-trimmer-linux
+            artifact: scrim-trimmer-x86_64.AppImage
+            artifact_name: scrim-trimmer-linux
           - os: windows-latest
-            artifact: eve-at-trimmer.exe
-            artifact_name: eve-at-trimmer-windows
+            artifact: scrim-trimmer.exe
+            artifact_name: scrim-trimmer-windows
           - os: macos-latest
-            artifact: eve-at-trimmer
-            artifact_name: eve-at-trimmer-macos
+            artifact: scrim-trimmer
+            artifact_name: scrim-trimmer-macos
 
     runs-on: ${{ matrix.os }}
     env:
@@ -113,8 +113,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/eve-at-trimmer-linux/eve-at-trimmer-x86_64.AppImage
-            artifacts/eve-at-trimmer-windows/eve-at-trimmer.exe
-            artifacts/eve-at-trimmer-macos/eve-at-trimmer
+            artifacts/scrim-trimmer-linux/scrim-trimmer-x86_64.AppImage
+            artifacts/scrim-trimmer-windows/scrim-trimmer.exe
+            artifacts/scrim-trimmer-macos/scrim-trimmer
             scrim-trimmer-*.zip
             scrim-trimmer-*.tar.gz
