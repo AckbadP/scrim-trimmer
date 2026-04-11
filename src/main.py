@@ -217,6 +217,7 @@ def _maybe_upload(
     if not getattr(args, "youtube_upload", False):
         return None
     cancel_event = getattr(args, "cancel_event", None)
+    progress_cb = getattr(args, "progress_callback", None)
     try:
         from youtube_uploader import upload as yt_upload
         title = (getattr(args, "youtube_title", "") or "").strip()
@@ -224,7 +225,12 @@ def _maybe_upload(
             title = os.path.splitext(os.path.basename(args.video))[0]
         notify("Uploading to YouTube...")
         print("\nUploading to YouTube...")
-        url = yt_upload(video_path, title, description, cancel_event=cancel_event)
+        if progress_cb:
+            progress_cb(0, 100)
+        def _yt_progress(pct: int):
+            if progress_cb:
+                progress_cb(pct, 100)
+        url = yt_upload(video_path, title, description, status_callback=_yt_progress, cancel_event=cancel_event)
         notify(f"Uploaded: {url}")
         print(f"YouTube: {url}")
         return url
