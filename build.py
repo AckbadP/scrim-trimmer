@@ -17,8 +17,8 @@ Usage:
   python build.py
 
 Output:
-  dist/eve-at-trimmer          (Linux — single executable)
-  dist/eve-at-trimmer.exe      (Windows — single executable)
+  dist/scrim-trimmer          (Linux — single executable)
+  dist/scrim-trimmer.exe      (Windows — single executable)
 """
 
 import os
@@ -92,8 +92,8 @@ def build_appimage():
     os.makedirs(app_dir)
 
     # Binary
-    src_bin = os.path.join(ROOT, "dist", "eve-at-trimmer")
-    dest_bin = os.path.join(app_dir, "eve-at-trimmer")
+    src_bin = os.path.join(ROOT, "dist", "scrim-trimmer")
+    dest_bin = os.path.join(app_dir, "scrim-trimmer")
     shutil.copy2(src_bin, dest_bin)
     os.chmod(dest_bin, os.stat(dest_bin).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
@@ -103,23 +103,23 @@ def build_appimage():
         f.write(
             '#!/bin/bash\n'
             'HERE="$(dirname "$(readlink -f "$0")")"\n'
-            'exec "$HERE/eve-at-trimmer" "$@"\n'
+            'exec "$HERE/scrim-trimmer" "$@"\n'
         )
     os.chmod(apprun, 0o755)
 
     # .desktop file
-    with open(os.path.join(app_dir, "eve-at-trimmer.desktop"), "w") as f:
+    with open(os.path.join(app_dir, "scrim-trimmer.desktop"), "w") as f:
         f.write(
             "[Desktop Entry]\n"
             "Name=EVE AT Practice Trimmer\n"
-            "Exec=eve-at-trimmer\n"
-            "Icon=eve-at-trimmer\n"
+            "Exec=scrim-trimmer\n"
+            "Icon=scrim-trimmer\n"
             "Type=Application\n"
             "Categories=Utility;\n"
         )
 
     # Icon
-    icon_dest = os.path.join(app_dir, "eve-at-trimmer.png")
+    icon_dest = os.path.join(app_dir, "scrim-trimmer.png")
     candidates = [
         os.path.join(ROOT, "icon.png"),
         os.path.join(SRC, "icon.png"),
@@ -132,7 +132,7 @@ def build_appimage():
         _make_placeholder_icon(icon_dest)
 
     # Run appimagetool (APPIMAGE_EXTRACT_AND_RUN avoids requiring FUSE on CI)
-    output = os.path.join(ROOT, "dist", "eve-at-trimmer-x86_64.AppImage")
+    output = os.path.join(ROOT, "dist", "scrim-trimmer-x86_64.AppImage")
     tool = get_appimagetool()
     env = {**os.environ, "ARCH": "x86_64", "APPIMAGE_EXTRACT_AND_RUN": "1"}
     print(f"  $ {tool} --no-appstream {app_dir} {output}")
@@ -166,7 +166,7 @@ def main():
         "--clean",
         "--noconfirm",
         "--onefile",
-        "--name", "eve-at-trimmer",
+        "--name", "scrim-trimmer",
         # Bundle data files that gui.py loads at runtime
         "--add-data", f"{os.path.join(SRC, 'no_log_warning.txt')}{sep}.",
         "--add-data", f"{os.path.join(ROOT, 'README.md')}{sep}.",
@@ -213,7 +213,7 @@ def main():
         print("\nPackaging AppImage...")
         out = build_appimage()
     else:
-        out = os.path.join(ROOT, "dist", "eve-at-trimmer")
+        out = os.path.join(ROOT, "dist", "scrim-trimmer")
         if system == "Windows":
             out += ".exe"
 
