@@ -129,8 +129,43 @@ class App(TkinterDnD.Tk):
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        main_frame = ttk.Frame(self, padding=16)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Scrollable container so content remains accessible when window is
+        # taller than the screen.
+        _scroll_outer = ttk.Frame(self)
+        _scroll_outer.pack(fill=tk.BOTH, expand=True)
+
+        self._vscroll = ttk.Scrollbar(_scroll_outer, orient=tk.VERTICAL)
+        self._vscroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._scroll_canvas = tk.Canvas(
+            _scroll_outer,
+            yscrollcommand=self._vscroll.set,
+            highlightthickness=0,
+        )
+        self._scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._vscroll.config(command=self._scroll_canvas.yview)
+
+        main_frame = ttk.Frame(self._scroll_canvas, padding=16)
+        _main_win = self._scroll_canvas.create_window((0, 0), window=main_frame, anchor="nw")
+
+        def _on_scroll_canvas_resize(e):
+            self._scroll_canvas.itemconfig(_main_win, width=e.width)
+
+        def _on_main_frame_resize(e):
+            self._scroll_canvas.configure(
+                scrollregion=self._scroll_canvas.bbox("all")
+            )
+
+        self._scroll_canvas.bind("<Configure>", _on_scroll_canvas_resize)
+        main_frame.bind("<Configure>", _on_main_frame_resize)
+
+        # Mousewheel scrolling (Linux uses Button-4/5)
+        def _on_mousewheel(e):
+            self._scroll_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        self._scroll_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self._scroll_canvas.bind_all("<Button-4>", lambda e: self._scroll_canvas.yview_scroll(-1, "units"))
+        self._scroll_canvas.bind_all("<Button-5>", lambda e: self._scroll_canvas.yview_scroll(1, "units"))
 
         # --- Drop zone ---
         self.drop_frame = ttk.LabelFrame(main_frame, text="Video File", padding=12)
@@ -749,13 +784,15 @@ class App(TkinterDnD.Tk):
                     self._append = gui_append
 
                 def write(self, data):
-                    self._orig.write(data)
+                    if self._orig is not None:
+                        self._orig.write(data)
                     if data:
                         fn = self._append
                         _app.after(0, lambda d=data: fn(d))
 
                 def flush(self):
-                    self._orig.flush()
+                    if self._orig is not None:
+                        self._orig.flush()
 
             stderr_capture = io.StringIO()
             old_stderr = sys.stderr
