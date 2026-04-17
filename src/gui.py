@@ -1351,9 +1351,25 @@ class App(TkinterDnD.Tk):
             win.destroy()
             self._launch_worker(args)
 
+        def _run_without_ffmpeg():
+            if not messagebox.askokcancel(
+                "Warning: Python clipper has limitations",
+                self._FFMPEG_WARNING,
+                icon="warning",
+            ):
+                return
+            args.run_without_ffmpeg = True
+            win.destroy()
+            self._launch_worker(args)
+
         install_btn = ttk.Button(btn_frame, text="Install via winget", command=_do_install)
         manual_btn = ttk.Button(btn_frame, text="Download page", command=_open_browser)
         continue_btn = ttk.Button(btn_frame, text="Continue", command=_continue)
+        alt_pipeline_btn = ttk.Button(
+            btn_frame,
+            text="Run without ffmpeg",
+            command=_run_without_ffmpeg,
+        )
         close_btn = ttk.Button(btn_frame, text="Close", command=win.destroy)
         cancel_btn = close_btn  # alias used inside _do_install
 
@@ -1362,6 +1378,8 @@ class App(TkinterDnD.Tk):
             manual_btn.pack(side=tk.LEFT, padx=(6, 0))
         else:
             manual_btn.pack(side=tk.LEFT)
+        if args is not None and tool == "ffmpeg":
+            alt_pipeline_btn.pack(side=tk.LEFT, padx=(6, 0))
         if args is not None:
             continue_btn.pack(side=tk.RIGHT, padx=(0, 6))
         close_btn.pack(side=tk.RIGHT)
