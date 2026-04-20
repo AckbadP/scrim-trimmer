@@ -207,7 +207,7 @@ class App(TkinterDnD.Tk):
             highlightthickness=0,
             cursor="crosshair",
         )
-        self.thumb_canvas.pack(fill=tk.BOTH, expand=True)
+        self.thumb_canvas.pack(fill=tk.X)
 
         ttk.Label(
             canvas_col,
@@ -223,6 +223,16 @@ class App(TkinterDnD.Tk):
 
         self.info_label = ttk.Label(canvas_col, text="", justify=tk.CENTER)
         self.info_label.pack(pady=(2, 0))
+
+        _size_row = ttk.Frame(canvas_col)
+        _size_row.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(_size_row, text="Size", font=("TkDefaultFont", 8), foreground="#888").pack(side=tk.LEFT)
+        self._preview_scale = ttk.Scale(
+            _size_row, from_=100, to=600, orient=tk.HORIZONTAL,
+            command=self._on_preview_scale,
+        )
+        self._preview_scale.set(THUMB_H)
+        self._preview_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
         # Pre-pack then hide so later .pack(after=drop_frame) places it correctly
         self.preview_frame.pack(after=self.drop_frame, fill=tk.BOTH, expand=True, pady=(10, 0))
@@ -630,6 +640,10 @@ class App(TkinterDnD.Tk):
         self._draw_region_rect()
 
     def _on_canvas_resize(self, event):
+        self._redraw_canvas()
+
+    def _on_preview_scale(self, val):
+        self.thumb_canvas.config(height=int(float(val)))
         self._redraw_canvas()
 
     def _draw_region_rect(self):
