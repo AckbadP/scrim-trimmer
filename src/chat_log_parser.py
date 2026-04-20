@@ -106,12 +106,14 @@ def parse_chat_logs(
             words = msg.strip().split()
             if not words:
                 continue
-            # Strip surrounding non-word characters before classifying (e.g. "-CD-" → "CD").
+            # Strip surrounding non-alphanumeric characters before classifying
+            # (e.g. "-CD-" → "CD", "CD__________" → "CD").
+            # \W misses underscore; use [^a-zA-Z0-9] instead.
             # Skip tokens that are pure punctuation (e.g. "*****" in "***** CD ******")
-            # and use the first token that has at least one word character.
+            # and use the first token that has at least one alphanumeric character.
             first = ''
             for w in words:
-                stripped = re.sub(r'^\W+|\W+$', '', w).upper()
+                stripped = re.sub(r'^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$', '', w).upper()
                 if stripped:
                     first = stripped
                     break

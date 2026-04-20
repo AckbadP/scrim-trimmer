@@ -239,6 +239,21 @@ class TestParseChatLogs:
             cd_times, wf_times = parse_chat_logs(["fake.log"], t0, 3600)
         assert len(cd_times) == 1   # only the real CD is counted
 
+    def test_cd_with_trailing_underscores_detected(self):
+        # "CD__________" must be classified as CD — trailing underscores were
+        # previously not stripped because \W excludes '_' (a word character).
+        path = self._make_log([
+            ("01:07:49", "Stu", "CD__________"),
+            ("01:19:50", "Rima", "wf"),
+        ])
+        t0 = game_time_to_seconds("01:05:00")
+        try:
+            cd_times, wf_times = parse_chat_logs([path], t0, 3600)
+            assert 169 in cd_times
+            assert 890 in wf_times
+        finally:
+            os.unlink(path)
+
     def test_midnight_wrap_applied_and_included(self):
         # Midnight crossing: t0=23:30:00 (84600s), event at 00:30:00 (1800s).
         # video_sec = 1800 - 84600 = -82800 < -3600 → wrap: +86400 → 3600.
