@@ -63,6 +63,7 @@ def parse_chat_logs(
     log_paths: List[str],
     t0_game_seconds: float,
     video_duration: float,
+    tournament_mode: bool = False,
 ) -> Tuple[List[int], List[int]]:
     """
     Extract CD and WF video timestamps from EVE chat log files.
@@ -76,6 +77,10 @@ def parse_chat_logs(
             where HH:MM:SS is the EVE game time when video recording began.
         video_duration: Total video length in seconds; events outside
             [0, duration] are discarded.
+        tournament_mode: When True, detect tournament system messages instead of
+            CD/WF player commands.  Start marker: EVE System message containing
+            "30 seconds until match start".  End marker: EVE System message
+            containing "Match completed!".
 
     Returns:
         (cd_timestamps, wf_timestamps): lists of integer video seconds.
@@ -94,20 +99,24 @@ def parse_chat_logs(
     wf_timestamps: List[int] = []
 
     for ts, player, msg in sorted_entries:
-        words = msg.strip().split()
-        if not words:
-            continue
-        # Strip surrounding non-word characters before classifying (e.g. "-CD-" → "CD").
-        # Skip tokens that are pure punctuation (e.g. "*****" in "***** CD ******")
-        # and use the first token that has at least one word character.
-        first = ''
-        for w in words:
-            stripped = re.sub(r'^\W+|\W+$', '', w).upper()
-            if stripped:
-                first = stripped
-                break
-        is_cd = first in ('CD', 'COUNTDOWN')
-        is_wf = first in ('WF', 'GF')
+        if tournament_mode:
+            is_cd = player.strip() == "EVE System" and "30 seconds until match start" in msg
+            is_wf = player.strip() == "EVE System" and "Match completed!" in msg
+        else:
+            words = msg.strip().split()
+            if not words:
+                continue
+            # Strip surrounding non-word characters before classifying (e.g. "-CD-" → "CD").
+            # Skip tokens that are pure punctuation (e.g. "*****" in "***** CD ******")
+            # and use the first token that has at least one word character.
+            first = ''
+            for w in words:
+                stripped = re.sub(r'^\W+|\W+$', '', w).upper()
+                if stripped:
+                    first = stripped
+                    break
+            is_cd = first in ('CD', 'COUNTDOWN')
+            is_wf = first in ('WF', 'GF')
         if not is_cd and not is_wf:
             continue
 

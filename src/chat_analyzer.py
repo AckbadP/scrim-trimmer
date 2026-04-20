@@ -202,6 +202,27 @@ def _check_line_for_command(line: str) -> str:
     return ""
 
 
+_TOURN_START_RE = re.compile(r'30\s+seconds\s+until\s+match\s+start', re.IGNORECASE)
+_TOURN_END_RE = re.compile(r'Match\s+completed', re.IGNORECASE)
+
+
+def _check_line_for_tournament_command(line: str) -> str:
+    """Return 'CD', 'WF', or '' for tournament system messages after the separator."""
+    sep_pos = -1
+    for sep in (">", "\u00bb"):
+        pos = line.rfind(sep)
+        if pos > sep_pos:
+            sep_pos = pos
+    if sep_pos == -1:
+        return ""
+    after_sep = line[sep_pos + 1:]
+    if _TOURN_START_RE.search(after_sep):
+        return "CD"
+    if _TOURN_END_RE.search(after_sep):
+        return "WF"
+    return ""
+
+
 # Guard window: only update max_cd_ts_secs when a new CD fires at least this
 # many video seconds after the previous one.  Prevents garbled-timestamp
 # duplicates from inflating the stale-WF threshold.  Smaller than
@@ -311,6 +332,7 @@ def _detect_command_no_sep(line: str) -> str:
 def analyze_frames(
     frame_texts: List[Tuple[int, str]],
     verbose: bool = False,
+    tournament_mode: bool = False,
 ) -> Tuple[List[int], List[int]]:
     """
     Scan OCR text from each frame and record video-seconds of new CD/WF events.
@@ -380,13 +402,16 @@ def analyze_frames(
                     if norm is not None:
                         carry_ts = norm
 
-                cmd = _check_line_for_command(line)
-                # Try no-separator detection for short lines that follow a
-                # timestamp header (carry_ts set) but have no '>' on them.
-                # This handles the common two-line EVE chat OCR format where
-                # the command appears on a line without a separator.
-                if not cmd and carry_ts is not None:
-                    cmd = _detect_command_no_sep(line)
+                if tournament_mode:
+                    cmd = _check_line_for_tournament_command(line)
+                else:
+                    cmd = _check_line_for_command(line)
+                    # Try no-separator detection for short lines that follow a
+                    # timestamp header (carry_ts set) but have no '>' on them.
+                    # This handles the common two-line EVE chat OCR format where
+                    # the command appears on a line without a separator.
+                    if not cmd and carry_ts is not None:
+                        cmd = _detect_command_no_sep(line)
 
                 if not cmd:
                     continue
@@ -479,8 +504,12 @@ def analyze_frames(
 
         elif not has_seen_timestamps:
             # ---- Monotonic fallback (no timestamps seen anywhere yet) ----
-            cd_count = count_keyword_in_messages(fixed, "CD")
-            wf_count = count_keyword_in_messages(fixed, "WF") + count_keyword_in_messages(fixed, "GF")
+            if tournament_mode:
+                cd_count = sum(1 for line in fixed.split("\n") if _check_line_for_tournament_command(line) == "CD")
+                wf_count = sum(1 for line in fixed.split("\n") if _check_line_for_tournament_command(line) == "WF")
+            else:
+                cd_count = count_keyword_in_messages(fixed, "CD")
+                wf_count = count_keyword_in_messages(fixed, "WF") + count_keyword_in_messages(fixed, "GF")
 
             if verbose and (cd_count > 0 or wf_count > 0):
                 print(f"  [{second}s] CD={cd_count} WF={wf_count}")

@@ -195,6 +195,16 @@ def parse_args():
             "Ignores chat logs and detects CD/WF events via OCR instead."
         ),
     )
+    parser.add_argument(
+        "--tournament-match",
+        action="store_true",
+        dest="tournament_match",
+        help=(
+            "Detect tournament match boundaries instead of CD/WF commands. "
+            "Start: 'EVE System > 30 seconds until match start...'. "
+            "End: 'EVE System > Match completed!'."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -371,7 +381,11 @@ def run(args) -> None:
         print(f"Chat log mode: {t0_source}  ({len(args.chat_logs)} log file(s))")
         _notify("Parsing chat log(s)...")
         print("\n[1/4] Parsing chat log(s)...")
-        cd_times, wf_times = parse_chat_logs(args.chat_logs, t0_sec, duration)
+        _tourn = getattr(args, "tournament_match", False)
+        cd_times, wf_times = parse_chat_logs(args.chat_logs, t0_sec, duration,
+                                               tournament_mode=_tourn)
+        if _tourn:
+            wf_times = [min(t + 10, duration) for t in wf_times]
         print(f"  Found {len(cd_times)} CD(s) at: {cd_times}")
         print(f"  Found {len(wf_times)} WF(s) at: {wf_times}")
 
@@ -464,7 +478,11 @@ def run(args) -> None:
     # Step 3: Detect CD/WF and pair them
     _notify("Analyzing chat for CD/WF commands...")
     print("\n[2/4] Analyzing chat for CD/WF commands...")
-    cd_times, wf_times = analyze_frames(frame_texts, verbose=args.verbose)
+    _tourn = getattr(args, "tournament_match", False)
+    cd_times, wf_times = analyze_frames(frame_texts, verbose=args.verbose,
+                                         tournament_mode=_tourn)
+    if _tourn:
+        wf_times = [min(t + 10, duration) for t in wf_times]
     print(f"  Found {len(cd_times)} CD(s) at: {cd_times}")
     print(f"  Found {len(wf_times)} WF(s) at: {wf_times}")
 

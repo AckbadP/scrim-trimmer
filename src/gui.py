@@ -112,6 +112,8 @@ class App(TkinterDnD.Tk):
         self.close_on_complete_var.trace_add("write", self._save_config)
         self.show_debug_popup_var = tk.BooleanVar(value=bool(_conf.get("show_debug_popup", False)))
         self.show_debug_popup_var.trace_add("write", self._save_config)
+        self.tournament_match_var = tk.BooleanVar(value=bool(_conf.get("tournament_match", False)))
+        self.tournament_match_var.trace_add("write", self._save_config)
         self.youtube_upload_var = tk.BooleanVar(value=bool(_conf.get("youtube_upload", False)))
         self.youtube_upload_var.trace_add("write", self._save_config)
         self.youtube_title_var = tk.StringVar(value=_conf.get("youtube_title", ""))
@@ -267,17 +269,21 @@ class App(TkinterDnD.Tk):
         ttk.Button(cl_frame, text="Browse", width=7,
                    command=self._browse_chatlog).grid(row=0, column=1, padx=(4, 0))
 
+        # tournament match toggle
+        ttk.Label(main_tab, text="Tournament Match?").grid(row=2, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Checkbutton(main_tab, variable=self.tournament_match_var).grid(row=2, column=1, sticky=tk.W, pady=2)
+
         # video title
-        ttk.Label(main_tab, text="Youtube Video Title").grid(row=2, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Label(main_tab, text="Youtube Video Title").grid(row=3, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         yt_title_frame = ttk.Frame(main_tab)
-        yt_title_frame.grid(row=2, column=1, sticky=tk.EW, pady=2)
+        yt_title_frame.grid(row=3, column=1, sticky=tk.EW, pady=2)
         yt_title_frame.columnconfigure(0, weight=1)
         self._yt_title_entry = ttk.Entry(yt_title_frame, textvariable=self.youtube_title_var)
         self._yt_title_entry.grid(row=0, column=0, sticky=tk.EW)
         self._yt_title_entry.bind("<FocusOut>", lambda _: self._save_config())
         ttk.Label(main_tab, text="Leave blank to use the video filename.",
                   foreground="#888", font=("TkDefaultFont", 8)).grid(
-            row=3, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
 
         # --- Advanced tab ---
         adv_tab = ttk.Frame(notebook, padding=(4, 6))
@@ -750,6 +756,7 @@ class App(TkinterDnD.Tk):
             chapters_dir=chapters_dir,
             youtube_upload=bool(self.youtube_upload_var.get()),
             youtube_title=self.youtube_title_var.get().strip(),
+            tournament_match=bool(self.tournament_match_var.get()),
         )
 
         self._launch_worker(args)
@@ -1114,6 +1121,7 @@ class App(TkinterDnD.Tk):
             "ram_cap_gb": self.ram_cap_var.get(),
             "youtube_upload": bool(self.youtube_upload_var.get()),
             "youtube_title": self.youtube_title_var.get(),
+            "tournament_match": bool(self.tournament_match_var.get()),
             "window_geometry": self.winfo_geometry(),
         })
 
