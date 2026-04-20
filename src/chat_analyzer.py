@@ -524,8 +524,13 @@ def analyze_frames(
     # Collapse detections of the same event that generated multiple entries due
     # to inconsistent OCR garbling of the same chat timestamp.  Only needed
     # in carry-forward mode; monotonic fallback already deduplicates correctly.
+    # In tournament mode the "30 seconds until match start" message stays
+    # visible for ~30 s, producing many duplicate detections with varying
+    # garbled timestamps.  Use a 40 s window to collapse them all into the
+    # earliest (first) detection.
     if has_seen_timestamps:
-        cd_timestamps = _merge_close_events(cd_timestamps, _CD_MERGE_WINDOW)
+        cd_merge = 40 if tournament_mode else _CD_MERGE_WINDOW
+        cd_timestamps = _merge_close_events(cd_timestamps, cd_merge)
         wf_timestamps = _merge_close_events(wf_timestamps, _WF_MERGE_WINDOW)
         # Remove any WFs that occur (in video time) before the first detected CD.
         # These are either pre-recording messages visible in the chat window at
