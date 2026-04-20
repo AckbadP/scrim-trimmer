@@ -830,3 +830,38 @@ class TestAnalyzeFramesVerbose:
         analyze_frames(frames, verbose=True)
         out = capsys.readouterr().out
         assert "CD=" in out
+
+
+# ---------------------------------------------------------------------------
+# Tournament mode
+# ---------------------------------------------------------------------------
+
+class TestTournamentMode:
+    def test_repeated_cd_detections_collapse_to_earliest(self):
+        # "30 seconds until match start" stays visible in chat for ~30 s.
+        # OCR re-detects it on subsequent frames with garbled timestamps that
+        # are >3 s apart and therefore pass the fuzzy dedup check, producing
+        # multiple entries in cd_timestamps (e.g. [100, 106, 112]).
+        #
+        # Before the fix (_CD_MERGE_WINDOW=5): these stay separate because each
+        # gap (6 s) exceeds the 5 s window.  pair_cd_wf uses the most-recent CD
+        # (112), so the clip misses the first ~12 s of the countdown.
+        #
+        # After the fix (tournament merge window=40): all three collapse into
+        # the earliest detection (100), so the clip starts at the first
+        # appearance of "30 seconds until match start".
+        cd_first    = "[17:08:43] EVE System > 30 seconds until match start..."
+        cd_redetect = "[17:08:49] EVE System > 30 seconds until match start..."
+        cd_late     = "[17:08:55] EVE System > 30 seconds until match start..."
+        wf          = "[17:13:34] EVE System > Match completed!"
+        frames = [
+            (100, cd_first),     # first detection of the countdown message
+            (106, cd_redetect),  # re-detection with garbled timestamp (+6 s)
+            (112, cd_late),      # another re-detection (+12 s garble)
+            (400, wf),
+        ]
+        cd_times, wf_times = analyze_frames(frames, tournament_mode=True)
+        assert cd_times == [100], f"expected single earliest CD; got {cd_times}"
+        assert wf_times == [400]
+        pairs = pair_cd_wf(cd_times, wf_times)
+        assert pairs == [(100, 400)], f"clip must start at first detection; got {pairs}"
