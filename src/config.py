@@ -57,6 +57,7 @@ _DEFAULTS = {
     "threads": None,  # None means use os.cpu_count()
     "youtube_upload": False,  # auto-upload final video to YouTube as unlisted after processing
     "youtube_title": "",  # video title; empty = use the video filename stem
+    "window_geometry": "",  # last window geometry string, e.g. "900x700+100+50"
 }
 
 

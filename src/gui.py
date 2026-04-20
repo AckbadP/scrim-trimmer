@@ -82,6 +82,7 @@ class App(TkinterDnD.Tk):
         self._timer_start: float | None = None
         self._timer_frozen: float | None = None
         self._timer_after_id = None
+        self._geom_save_after = None
 
         # Canvas state
         self._canvas_img_id = None
@@ -116,6 +117,11 @@ class App(TkinterDnD.Tk):
         self.youtube_title_var = tk.StringVar(value=_conf.get("youtube_title", ""))
 
         self._build_ui()
+
+        saved_geom = _conf.get("window_geometry", "")
+        if saved_geom:
+            self.geometry(saved_geom)
+        self.bind("<Configure>", self._on_window_configure)
 
         # Auto-load most recent video if a default video directory is configured
         video_dir = os.path.expanduser(self.default_video_dir_var.get().strip())
@@ -1086,7 +1092,15 @@ class App(TkinterDnD.Tk):
     # Helpers
     # ------------------------------------------------------------------
 
+    def _on_window_configure(self, event):
+        if event.widget is not self:
+            return
+        if self._geom_save_after is not None:
+            self.after_cancel(self._geom_save_after)
+        self._geom_save_after = self.after(500, self._save_config)
+
     def _save_config(self, *_):
+        self._geom_save_after = None
         cfg.save_config({
             "video_dir": self.default_video_dir_var.get(),
             "log_dir": self.default_log_dir_var.get(),
@@ -1100,6 +1114,7 @@ class App(TkinterDnD.Tk):
             "ram_cap_gb": self.ram_cap_var.get(),
             "youtube_upload": bool(self.youtube_upload_var.get()),
             "youtube_title": self.youtube_title_var.get(),
+            "window_geometry": self.winfo_geometry(),
         })
 
     @staticmethod
