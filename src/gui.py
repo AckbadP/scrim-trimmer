@@ -137,47 +137,9 @@ class App(TkinterDnD.Tk):
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        # Scrollable container so content remains accessible when window is
-        # taller than the screen.
-        _scroll_outer = ttk.Frame(self)
-        _scroll_outer.pack(fill=tk.BOTH, expand=True)
-
-        self._vscroll = ttk.Scrollbar(_scroll_outer, orient=tk.VERTICAL)
-        self._vscroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self._scroll_canvas = tk.Canvas(
-            _scroll_outer,
-            yscrollcommand=self._vscroll.set,
-            highlightthickness=0,
-        )
-        self._scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._vscroll.config(command=self._scroll_canvas.yview)
-
-        main_frame = ttk.Frame(self._scroll_canvas, padding=16)
-        _main_win = self._scroll_canvas.create_window((0, 0), window=main_frame, anchor="nw")
-
-        def _on_scroll_canvas_resize(e):
-            self._scroll_canvas.itemconfig(_main_win, width=e.width)
-
-        def _on_main_frame_resize(e):
-            self._scroll_canvas.configure(
-                scrollregion=self._scroll_canvas.bbox("all")
-            )
-
-        self._scroll_canvas.bind("<Configure>", _on_scroll_canvas_resize)
-        main_frame.bind("<Configure>", _on_main_frame_resize)
-
-        # Mousewheel scrolling (Linux uses Button-4/5)
-        def _on_mousewheel(e):
-            self._scroll_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-
-        self._scroll_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        self._scroll_canvas.bind_all("<Button-4>", lambda e: self._scroll_canvas.yview_scroll(-1, "units"))
-        self._scroll_canvas.bind_all("<Button-5>", lambda e: self._scroll_canvas.yview_scroll(1, "units"))
-
         # --- Drop zone ---
-        self.drop_frame = ttk.LabelFrame(main_frame, text="Video File", padding=12)
-        self.drop_frame.pack(fill=tk.X)
+        self.drop_frame = ttk.LabelFrame(self, text="Video File", padding=12)
+        self.drop_frame.pack(fill=tk.X, padx=16, pady=(16, 0))
 
         self.drop_hint = ttk.Label(
             self.drop_frame,
@@ -192,22 +154,38 @@ class App(TkinterDnD.Tk):
         self.drop_frame.drop_target_register(DND_FILES)
         self.drop_frame.dnd_bind("<<Drop>>", self._on_drop)
 
-        # --- Preview (hidden until file loaded) ---
-        self.preview_frame = ttk.LabelFrame(main_frame, text="Preview", padding=8)
+        # --- Preview (expands to fill extra window space when resized) ---
+        self.preview_frame = ttk.LabelFrame(self, text="Preview", padding=8)
 
-        # Left column: canvas + hint
+        _bg = ttk.Style().lookup("TFrame", "background") or self.cget("bg")
+
+        # Left column: canvas + controls
         canvas_col = ttk.Frame(self.preview_frame)
         canvas_col.pack(side=tk.LEFT, padx=(0, 12), fill=tk.BOTH, expand=True)
 
-        _bg = ttk.Style().lookup("TFrame", "background") or self.cget("bg")
+        # Canvas with horizontal and vertical scrollbars
+        canvas_container = ttk.Frame(canvas_col)
+        canvas_container.pack(fill=tk.BOTH, expand=True)
+        canvas_container.rowconfigure(0, weight=1)
+        canvas_container.columnconfigure(0, weight=1)
+
+        self._cv_vscroll_preview = ttk.Scrollbar(canvas_container, orient=tk.VERTICAL)
+        self._cv_vscroll_preview.grid(row=0, column=1, sticky=tk.NS)
+
+        self._cv_hscroll = ttk.Scrollbar(canvas_container, orient=tk.HORIZONTAL)
+        self._cv_hscroll.grid(row=1, column=0, sticky=tk.EW)
+
         self.thumb_canvas = tk.Canvas(
-            canvas_col,
-            width=THUMB_W, height=THUMB_H,
+            canvas_container,
             bg=_bg, bd=0,
             highlightthickness=0,
             cursor="crosshair",
+            xscrollcommand=self._cv_hscroll.set,
+            yscrollcommand=self._cv_vscroll_preview.set,
         )
-        self.thumb_canvas.pack(fill=tk.X)
+        self.thumb_canvas.grid(row=0, column=0, sticky=tk.NSEW)
+        self._cv_hscroll.config(command=self.thumb_canvas.xview)
+        self._cv_vscroll_preview.config(command=self.thumb_canvas.yview)
 
         ttk.Label(
             canvas_col,
@@ -224,23 +202,14 @@ class App(TkinterDnD.Tk):
         self.info_label = ttk.Label(canvas_col, text="", justify=tk.CENTER)
         self.info_label.pack(pady=(2, 0))
 
-        _size_row = ttk.Frame(canvas_col)
-        _size_row.pack(fill=tk.X, pady=(4, 0))
-        ttk.Label(_size_row, text="Size", font=("TkDefaultFont", 8), foreground="#888").pack(side=tk.LEFT)
-        self._preview_scale = ttk.Scale(
-            _size_row, from_=100, to=600, orient=tk.HORIZONTAL,
-            command=self._on_preview_scale,
-        )
-        self._preview_scale.set(THUMB_H)
-        self._preview_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
-        # Pre-pack then hide so later .pack(after=drop_frame) places it correctly
-        self.preview_frame.pack(after=self.drop_frame, fill=tk.BOTH, expand=True, pady=(10, 0))
+        # Pre-pack then hide; _load_video re-packs it after drop_frame
+        self.preview_frame.pack(after=self.drop_frame, fill=tk.BOTH, expand=True, padx=16, pady=(10, 0))
         self.preview_frame.pack_forget()
 
         # --- Options ---
-        self.opts_frame = ttk.LabelFrame(main_frame, text="Options", padding=8)
-        self.opts_frame.pack(fill=tk.X, pady=(10, 0))
+        self.opts_frame = ttk.LabelFrame(self, text="Options", padding=8)
+        self.opts_frame.pack(fill=tk.X, padx=16, pady=(10, 0))
 
         saved_out = self.default_output_dir_var.get()
         self.output_var = tk.StringVar(value=saved_out if saved_out else "out")
@@ -424,7 +393,7 @@ class App(TkinterDnD.Tk):
         self.after_idle(_apply_initial_tab_size)
 
         # --- Reset / Help buttons ---
-        btn_frame = ttk.Frame(main_frame)
+        btn_frame = ttk.Frame(self)
         btn_frame.pack(pady=(12, 4))
 
         ttk.Button(btn_frame, text="Reset", command=self._reset, width=10).pack(side=tk.LEFT, padx=6)
@@ -439,9 +408,9 @@ class App(TkinterDnD.Tk):
         self._progress_msg = "Ready"
         self._progress_running = False
         self._progress_fg_idle = _fg
-        self.progress_canvas = tk.Canvas(main_frame, height=22, bd=1, relief=tk.SUNKEN,
+        self.progress_canvas = tk.Canvas(self, height=22, bd=1, relief=tk.SUNKEN,
                                          highlightthickness=0, bg=_trough)
-        self.progress_canvas.pack(fill=tk.X, pady=(4, 0))
+        self.progress_canvas.pack(fill=tk.X, padx=16, pady=(4, 0))
         self._prog_fill = self.progress_canvas.create_rectangle(0, 0, 0, 22, fill=_fill, outline="")
         self._prog_text = self.progress_canvas.create_text(
             0, 11, text="Ready", fill=_fg, anchor="center",
@@ -449,8 +418,8 @@ class App(TkinterDnD.Tk):
         self.progress_canvas.bind("<Configure>", lambda e: self._redraw_progress())
 
         # --- Run / Cancel buttons (bottom) ---
-        run_frame = ttk.Frame(main_frame)
-        run_frame.pack(fill=tk.X, pady=(8, 4))
+        run_frame = ttk.Frame(self)
+        run_frame.pack(fill=tk.X, padx=16, pady=(8, 16))
         run_frame.columnconfigure(0, weight=1)
 
         self.run_btn = ttk.Button(run_frame, text="Run", command=self._run,
@@ -563,7 +532,7 @@ class App(TkinterDnD.Tk):
             self.output_var.set(default_out)
 
         # Auto-select closest "Local" log — reveal first so errors are always visible
-        self.preview_frame.pack(after=self.drop_frame, fill=tk.BOTH, expand=True, pady=(10, 0))
+        self.preview_frame.pack(after=self.drop_frame, fill=tk.BOTH, expand=True, padx=16, pady=(10, 0))
         self.run_btn.configure(state="normal")
 
         status_log = ""
@@ -616,7 +585,7 @@ class App(TkinterDnD.Tk):
         self._redraw_canvas()
 
     def _redraw_canvas(self):
-        """Re-render the stored PIL image letterboxed into the canvas, then redraw rect."""
+        """Re-render stored PIL image letterboxed into the canvas; update scrollregion and rect."""
         cw = self.thumb_canvas.winfo_width()
         ch = self.thumb_canvas.winfo_height()
         if self._thumb_pil is None or cw <= 1 or ch <= 1:
@@ -637,13 +606,10 @@ class App(TkinterDnD.Tk):
         else:
             self.thumb_canvas.itemconfig(self._canvas_img_id, image=photo)
             self.thumb_canvas.coords(self._canvas_img_id, ox, oy)
+        self.thumb_canvas.configure(scrollregion=(0, 0, max(cw, ox + dw), max(ch, oy + dh)))
         self._draw_region_rect()
 
     def _on_canvas_resize(self, event):
-        self._redraw_canvas()
-
-    def _on_preview_scale(self, val):
-        self.thumb_canvas.config(height=int(float(val)))
         self._redraw_canvas()
 
     def _draw_region_rect(self):
@@ -663,15 +629,17 @@ class App(TkinterDnD.Tk):
         self.thumb_canvas.tag_raise(self._canvas_rect_id)
 
     def _on_region_press(self, event):
-        self._drag_start = (event.x, event.y)
+        cx = self.thumb_canvas.canvasx(event.x)
+        cy = self.thumb_canvas.canvasy(event.y)
+        self._drag_start = (cx, cy)
         if self._canvas_rect_id is None:
             self._canvas_rect_id = self.thumb_canvas.create_rectangle(
-                event.x, event.y, event.x, event.y,
+                cx, cy, cx, cy,
                 outline="#00ff00", width=2, dash=(4, 2)
             )
         else:
             self.thumb_canvas.coords(
-                self._canvas_rect_id, event.x, event.y, event.x, event.y
+                self._canvas_rect_id, cx, cy, cx, cy
             )
         self.thumb_canvas.tag_raise(self._canvas_rect_id)
 
@@ -679,10 +647,12 @@ class App(TkinterDnD.Tk):
         if self._drag_start is None or self._canvas_rect_id is None:
             return
         x0, y0 = self._drag_start
+        cx = self.thumb_canvas.canvasx(event.x)
+        cy = self.thumb_canvas.canvasy(event.y)
         self.thumb_canvas.coords(
             self._canvas_rect_id,
-            min(x0, event.x), min(y0, event.y),
-            max(x0, event.x), max(y0, event.y),
+            min(x0, cx), min(y0, cy),
+            max(x0, cx), max(y0, cy),
         )
 
     def _on_region_release(self, event):
@@ -694,10 +664,12 @@ class App(TkinterDnD.Tk):
         if self._img_rect is None:
             return
         ox, oy, dw, dh = self._img_rect
-        x1 = max(0.0, min(1.0, (min(x0, event.x) - ox) / dw))
-        y1 = max(0.0, min(1.0, (min(y0, event.y) - oy) / dh))
-        x2 = max(0.0, min(1.0, (max(x0, event.x) - ox) / dw))
-        y2 = max(0.0, min(1.0, (max(y0, event.y) - oy) / dh))
+        cx = self.thumb_canvas.canvasx(event.x)
+        cy = self.thumb_canvas.canvasy(event.y)
+        x1 = max(0.0, min(1.0, (min(x0, cx) - ox) / dw))
+        y1 = max(0.0, min(1.0, (min(y0, cy) - oy) / dh))
+        x2 = max(0.0, min(1.0, (max(x0, cx) - ox) / dw))
+        y2 = max(0.0, min(1.0, (max(y0, cy) - oy) / dh))
 
         # Ignore tiny drags (accidental clicks)
         if x2 - x1 < 0.02 or y2 - y1 < 0.02:
