@@ -7,6 +7,7 @@ Settings are stored in ~/.config/eve-trimmer/config.json.
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".config" / "eve-trimmer" / "config.json"
@@ -46,6 +47,11 @@ def default_log_dir() -> str:
     return str(Path.home() / "Documents" / "EVE" / "logs" / "Chatlogs")
 
 
+def default_youtube_title() -> str:
+    """Return today's UTC date as MM-DD, the default YouTube video title."""
+    return datetime.now(timezone.utc).strftime("%m-%d")
+
+
 _DEFAULTS = {
     "video_dir": str(Path.home() / "Videos"),
     "log_dir": "",
@@ -56,7 +62,6 @@ _DEFAULTS = {
     "chat_region": [0.0, 0.35, 0.15, 1.0],  # [x1, y1, x2, y2] as fractions
     "threads": None,  # None means use os.cpu_count()
     "youtube_upload": False,  # auto-upload final video to YouTube as unlisted after processing
-    "youtube_title": "",  # video title; empty = use the video filename stem
     "window_geometry": "",  # last window geometry string, e.g. "900x700+100+50"
 }
 

@@ -98,7 +98,7 @@ The thumbnail is resizable: drag the window edges to make it larger for more pre
 | **Show timestamps popup** | on | After a successful run, open a popup window displaying YouTube chapter timestamps (see below). |
 | **Close when done** | off | Automatically close the application once processing completes. |
 | **Upload to YouTube** | off | Automatically upload `final_output.mp4` to YouTube as an unlisted video once processing finishes (see below). |
-| **Video title** | *(blank)* | Title for the uploaded YouTube video. Leave blank to use the video filename. |
+| **Video title** | today's date (UTC, `MM-DD`) | Title for the uploaded YouTube video. Re-derived from the current date every time the app launches or is reset (not remembered between runs). Leave blank to use the video filename. |
 
 ### YouTube chapter timestamps
 

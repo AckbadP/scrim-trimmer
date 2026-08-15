@@ -116,7 +116,7 @@ class App(TkinterDnD.Tk):
         self.tournament_match_var.trace_add("write", self._save_config)
         self.youtube_upload_var = tk.BooleanVar(value=bool(_conf.get("youtube_upload", False)))
         self.youtube_upload_var.trace_add("write", self._save_config)
-        self.youtube_title_var = tk.StringVar(value=_conf.get("youtube_title", ""))
+        self.youtube_title_var = tk.StringVar(value=cfg.default_youtube_title())
 
         self._build_ui()
 
@@ -259,8 +259,7 @@ class App(TkinterDnD.Tk):
         yt_title_frame.columnconfigure(0, weight=1)
         self._yt_title_entry = ttk.Entry(yt_title_frame, textvariable=self.youtube_title_var)
         self._yt_title_entry.grid(row=0, column=0, sticky=tk.EW)
-        self._yt_title_entry.bind("<FocusOut>", lambda _: self._save_config())
-        ttk.Label(main_tab, text="Leave blank to use the video filename.",
+        ttk.Label(main_tab, text="Defaults to today's date (UTC). Leave blank to use the video filename.",
                   foreground="#888", font=("TkDefaultFont", 8)).grid(
             row=4, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
 
@@ -856,6 +855,7 @@ class App(TkinterDnD.Tk):
         self.output_var.set(default_out if default_out else "out")
         self.t0_var.set("")
         self.chat_log_var.set("")
+        self.youtube_title_var.set(cfg.default_youtube_title())
         self.verbose_var.set(False)
         self.preview_frame.pack_forget()
         self.run_btn.configure(state="disabled")
@@ -1106,7 +1106,6 @@ class App(TkinterDnD.Tk):
             "threads": self.threads_var.get(),
             "ram_cap_gb": self.ram_cap_var.get(),
             "youtube_upload": bool(self.youtube_upload_var.get()),
-            "youtube_title": self.youtube_title_var.get(),
             "tournament_match": bool(self.tournament_match_var.get()),
             "window_geometry": self.winfo_geometry(),
         })
