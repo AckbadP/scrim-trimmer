@@ -9,10 +9,64 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import List, Tuple
+import threading
+from typing import List, Optional, Tuple
 
 
 _force_python: bool = False
+
+# How often to poll a running ffmpeg process for cancellation.
+_POLL_INTERVAL = 0.5
+
+
+def _run_ffmpeg(cmd: List[str], cancel_event: Optional[threading.Event] = None):
+    """
+    Run an ffmpeg command and return a subprocess.CompletedProcess-like result
+    with .returncode and .stderr.
+
+    stdin is always redirected to DEVNULL with -nostdin already in `cmd` — an
+    ffmpeg inheriting an interactive stdin (e.g. under a console-mode build)
+    can otherwise wait on it indefinitely.
+
+    When `cancel_event` is given, the process is polled instead of waited on
+    with a single blocking call, so it can be terminated (then killed) as
+    soon as the event is set — without this, Cancel has no effect once
+    clip extraction/stitching has started.
+    """
+    if cancel_event is None:
+        return subprocess.run(
+            cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        )
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=_POLL_INTERVAL)
+                break
+            except subprocess.TimeoutExpired:
+                if cancel_event.is_set():
+                    proc.terminate()
+                    try:
+                        proc.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.communicate()
+                    raise RuntimeError("__cancelled__")
+    except RuntimeError:
+        raise
+    except BaseException:
+        # Any other failure (e.g. the calling thread being torn down) — make
+        # sure we don't leak the ffmpeg child.
+        proc.kill()
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def set_force_python(value: bool) -> None:
@@ -34,24 +88,30 @@ def _extract_clip_ffmpeg(
     start_sec: int,
     end_sec: int,
     output_path: str,
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
     cmd = [
         "ffmpeg",
         "-y",
+        "-nostdin",
         "-ss", str(start_sec),
         "-to", str(end_sec),
         "-i", input_path,
         "-c", "copy",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = _run_ffmpeg(cmd, cancel_event)
     if result.returncode != 0:
         raise RuntimeError(
             f"ffmpeg failed extracting clip {start_sec}–{end_sec}s:\n{result.stderr}"
         )
 
 
-def _stitch_clips_ffmpeg(clip_paths: List[str], output_path: str) -> None:
+def _stitch_clips_ffmpeg(
+    clip_paths: List[str],
+    output_path: str,
+    cancel_event: Optional[threading.Event] = None,
+) -> None:
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", delete=False
     ) as f:
@@ -63,13 +123,14 @@ def _stitch_clips_ffmpeg(clip_paths: List[str], output_path: str) -> None:
         cmd = [
             "ffmpeg",
             "-y",
+            "-nostdin",
             "-f", "concat",
             "-safe", "0",
             "-i", concat_list_path,
             "-c", "copy",
             output_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = _run_ffmpeg(cmd, cancel_event)
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg concat failed:\n{result.stderr}")
     finally:
@@ -145,6 +206,7 @@ def extract_clip(
     start_sec: int,
     end_sec: int,
     output_path: str,
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
     """
     Extract a clip from a video file.
@@ -157,9 +219,12 @@ def extract_clip(
         start_sec: Clip start time in seconds.
         end_sec: Clip end time in seconds.
         output_path: Destination path for the extracted clip.
+        cancel_event: If set while ffmpeg is running, the process is
+            terminated (then killed) and RuntimeError("__cancelled__") is
+            raised. Ignored by the Python fallback.
     """
     if not _use_python_clipper():
-        _extract_clip_ffmpeg(input_path, start_sec, end_sec, output_path)
+        _extract_clip_ffmpeg(input_path, start_sec, end_sec, output_path, cancel_event)
     else:
         if _force_python:
             print("  [info] Python clipper forced — re-encoding, no audio")
@@ -168,7 +233,11 @@ def extract_clip(
         _extract_clip_python(input_path, start_sec, end_sec, output_path)
 
 
-def stitch_clips(clip_paths: List[str], output_path: str) -> None:
+def stitch_clips(
+    clip_paths: List[str],
+    output_path: str,
+    cancel_event: Optional[threading.Event] = None,
+) -> None:
     """
     Concatenate multiple clips into a single video.
 
@@ -178,12 +247,15 @@ def stitch_clips(clip_paths: List[str], output_path: str) -> None:
     Args:
         clip_paths: Ordered list of clip paths to concatenate.
         output_path: Destination path for the final stitched video.
+        cancel_event: If set while ffmpeg is running, the process is
+            terminated (then killed) and RuntimeError("__cancelled__") is
+            raised. Ignored by the Python fallback.
     """
     if not clip_paths:
         raise ValueError("No clips to stitch.")
 
     if not _use_python_clipper():
-        _stitch_clips_ffmpeg(clip_paths, output_path)
+        _stitch_clips_ffmpeg(clip_paths, output_path, cancel_event)
     else:
         if _force_python:
             print("  [info] Python clipper forced — re-encoding, no audio")
@@ -196,6 +268,8 @@ def create_clips(
     input_path: str,
     pairs: List[Tuple[int, int]],
     output_dir: str,
+    cancel_event: Optional[threading.Event] = None,
+    status_callback=None,
 ) -> List[str]:
     """
     Extract all (cd, wf) clips from the input video.
@@ -204,17 +278,26 @@ def create_clips(
         input_path: Source video path (.mp4 or .mkv).
         pairs: List of (start_sec, end_sec) tuples.
         output_dir: Directory to save individual clips.
+        cancel_event: Checked between clips (and inside each ffmpeg call);
+            raises RuntimeError("__cancelled__") when set.
+        status_callback: Optional callable(str) invoked with a human-readable
+            "Extracting clip i/n" message before each clip.
 
     Returns:
         Ordered list of clip file paths.
     """
     os.makedirs(output_dir, exist_ok=True)
     clip_paths = []
+    total = len(pairs)
 
     for i, (start, end) in enumerate(pairs, start=1):
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("__cancelled__")
         clip_path = os.path.join(output_dir, f"clip_{i:03d}.mp4")
         print(f"  Extracting clip {i}: {start}s → {end}s → {clip_path}")
-        extract_clip(input_path, start, end, clip_path)
+        if status_callback is not None:
+            status_callback(f"Extracting clip {i}/{total}...")
+        extract_clip(input_path, start, end, clip_path, cancel_event)
         clip_paths.append(clip_path)
 
     return clip_paths

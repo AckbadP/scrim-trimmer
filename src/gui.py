@@ -772,8 +772,26 @@ class App(TkinterDnD.Tk):
 
         def worker():
             import io
+            import queue
 
             _app = self
+            # Coalesce writes instead of scheduling a Tk `after` per write —
+            # OCR mode writes one progress line per video-second, so a long
+            # run could queue thousands of individual Tk callbacks, each one
+            # mutating the debug Text widget and flooding the event loop.
+            _log_queue: "queue.SimpleQueue[str]" = queue.SimpleQueue()
+            _drain_scheduled = [False]
+
+            def _drain_log_queue(fn):
+                chunks = []
+                try:
+                    while True:
+                        chunks.append(_log_queue.get_nowait())
+                except queue.Empty:
+                    pass
+                if chunks:
+                    fn("".join(chunks))
+                _drain_scheduled[0] = False
 
             class _TeeStream:
                 """Writes to both the original stream and the debug window."""
@@ -785,8 +803,10 @@ class App(TkinterDnD.Tk):
                     if self._orig is not None:
                         self._orig.write(data)
                     if data:
-                        fn = self._append
-                        _app.after(0, lambda d=data: fn(d))
+                        _log_queue.put(data)
+                        if not _drain_scheduled[0]:
+                            _drain_scheduled[0] = True
+                            _app.after(100, lambda fn=self._append: _drain_log_queue(fn))
 
                 def flush(self):
                     if self._orig is not None:
@@ -814,6 +834,8 @@ class App(TkinterDnD.Tk):
                 self.after(0, lambda: self._set_status("Cancelled"))
             except pipeline.MissingDependencyError as exc:
                 self.after(0, lambda e=exc, a=args: self._show_install_dialog(e.tool, a, debug_append=debug_append))
+            except pipeline.UnfinalizedSourceError as exc:
+                self.after(0, lambda e=exc, a=args: self._show_unfinalized_dialog(str(e), a))
             except SystemExit as e:
                 captured = stderr_capture.getvalue().strip()
                 msg = captured if captured else f"Pipeline stopped (exit {e.code})"
@@ -995,8 +1017,35 @@ class App(TkinterDnD.Tk):
         ww, wh = win.winfo_width(), win.winfo_height()
         win.geometry(f"+{px + (pw - ww) // 2}+{py + (ph - wh) // 2}")
 
+        _MAX_LOG_LINES = 2000
+        _progress_open = [False]
+        # NB: "end" as an insert/delete *index* resolves to right before the
+        # widget's mandatory trailing newline, one position earlier than the
+        # literal index mark_set("m", tk.END) would freeze on an empty
+        # widget. Anchor the mark on "end-1c" so it lines up with where
+        # insert(tk.END, ...) actually writes.
+        text.mark_set("progress_start", "end-1c")
+        text.mark_gravity("progress_start", tk.LEFT)
+
         def append(data: str):
-            text.insert(tk.END, data)
+            # Progress bars write '\r...' repeatedly to redraw one line in a
+            # terminal; without this, a long OCR run leaves thousands of
+            # stale progress lines piled up in the Text widget instead of
+            # one that updates in place.
+            for i, seg in enumerate(data.split("\r")):
+                if i > 0 and _progress_open[0]:
+                    text.delete("progress_start", "end-1c")
+                if seg:
+                    if not _progress_open[0]:
+                        text.mark_set("progress_start", "end-1c")
+                    text.insert(tk.END, seg)
+                    _progress_open[0] = not seg.endswith("\n")
+                elif i > 0:
+                    _progress_open[0] = False
+
+            line_count = int(text.index("end-1c").split(".")[0])
+            if line_count > _MAX_LOG_LINES:
+                text.delete("1.0", f"{line_count - _MAX_LOG_LINES}.0")
             text.see(tk.END)
 
         return append
@@ -1112,7 +1161,15 @@ class App(TkinterDnD.Tk):
 
     @staticmethod
     def _find_latest_video(video_dir: str) -> str | None:
-        """Return the path of the most recently modified video file in video_dir."""
+        """
+        Return the path of the most recently modified video file in video_dir.
+
+        Prefers a file whose mtime is more than ~10s old: a very fresh mtime
+        usually means the recorder (e.g. the game client) is still actively
+        writing it, and auto-loading that file would default the pipeline
+        onto an in-progress recording. Falls back to the newest file if
+        that's genuinely the only candidate.
+        """
         candidates = [
             os.path.join(video_dir, f)
             for f in os.listdir(video_dir)
@@ -1121,7 +1178,12 @@ class App(TkinterDnD.Tk):
         ]
         if not candidates:
             return None
-        return max(candidates, key=os.path.getmtime)
+        candidates.sort(key=os.path.getmtime, reverse=True)
+        now = time.time()
+        for path in candidates:
+            if now - os.path.getmtime(path) > 10:
+                return path
+        return candidates[0]
 
     @staticmethod
     def _find_closest_log(video_path: str, log_dir: str) -> str | None:
@@ -1209,6 +1271,25 @@ class App(TkinterDnD.Tk):
         "tesseract": "https://github.com/UB-Mannheim/tesseract/wiki",
         "ffmpeg": "https://ffmpeg.org/download.html",
     }
+
+    def _show_unfinalized_dialog(self, warning: str, args):
+        """
+        Ask whether to proceed after check_source_video() flagged the source
+        as still-being-written or missing a valid container index. Proceeding
+        re-runs the pipeline with force_unfinalized set so the check is
+        skipped the second time.
+        """
+        self._set_status("Source video may still be recording")
+        proceed = messagebox.askokcancel(
+            "Recording may still be in progress",
+            warning + "\n\nProceed anyway? This may be very slow.",
+            icon="warning",
+        )
+        if proceed:
+            args.force_unfinalized = True
+            self._launch_worker(args)
+        else:
+            self._set_status("Cancelled")
 
     def _show_install_dialog(self, tool: str, args=None, debug_append=None):
         """Show a dialog offering to install a missing dependency via winget."""

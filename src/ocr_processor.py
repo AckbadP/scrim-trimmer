@@ -56,19 +56,28 @@ def preprocess_for_ocr(region: np.ndarray) -> Image.Image:
     return Image.fromarray(scaled)
 
 
-def run_ocr_on_region(region: np.ndarray) -> str:
+def run_ocr_on_region(region: np.ndarray, timeout: float = 120.0) -> str:
     """
     Extract text from a pre-cropped chat region using Tesseract.
 
     Args:
-        region: Pre-cropped BGR numpy array of the chat window.
+        region:  Pre-cropped BGR numpy array of the chat window.
+        timeout: Max seconds to wait for the tesseract subprocess before
+            killing it and raising. Without this, a wedged tesseract child
+            (e.g. fed a corrupt/partial frame) blocks its worker thread
+            forever (pytesseract defaults to an unbounded wait).
 
     Returns:
         OCR text string from the chat window.
+
+    Raises:
+        RuntimeError: if tesseract does not finish within `timeout` seconds.
     """
     pil_img = preprocess_for_ocr(region)
     # PSM 6: Assume a single uniform block of text (good for chat columns)
-    return pytesseract.image_to_string(pil_img, config="--psm 6 --oem 3")
+    return pytesseract.image_to_string(
+        pil_img, config="--psm 6 --oem 3", timeout=timeout
+    )
 
 
 def run_ocr(

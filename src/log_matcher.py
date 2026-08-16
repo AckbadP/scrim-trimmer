@@ -31,6 +31,7 @@ import cv2
 import numpy as np
 
 from chat_log_parser import read_chat_log
+from frame_extractor import probe_duration
 from ocr_processor import crop_chat_region, run_ocr_on_region
 
 
@@ -116,72 +117,97 @@ def detect_t0(
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Cannot open video: {video_path}")
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            raise ValueError(f"Invalid FPS ({fps}) in video: {video_path}")
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = int(total_frames / fps)
+        # Prefer ffprobe's container-reported duration over OpenCV's
+        # frame-count/fps estimate: on an unfinalized/still-being-written
+        # file the frame count can be wildly wrong (or the file can outgrow
+        # it mid-scan), which would otherwise turn the loop below into
+        # thousands of pointless seek-and-fail iterations.
+        probed = probe_duration(video_path)
+        if probed is not None:
+            duration = int(probed)
+        else:
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            duration = int(total_frames / fps)
 
-    # Best (highest) t0 candidate seen so far for each unique message.
-    # A message that is still on screen at sample frame V gives candidate
-    # game_sec - V, which is a lower bound on t0.  The first frame the message
-    # appears in yields the highest (tightest) lower bound.  Later frames of
-    # the same message give progressively lower (looser) bounds, which only
-    # corrupt the density calculation.  Keeping only the highest candidate per
-    # message prevents stale detections from forming false dense clusters.
-    best_per_msg: Dict[str, int] = {}
-    frames_sampled = 0
+        # Best (highest) t0 candidate seen so far for each unique message.
+        # A message that is still on screen at sample frame V gives candidate
+        # game_sec - V, which is a lower bound on t0.  The first frame the message
+        # appears in yields the highest (tightest) lower bound.  Later frames of
+        # the same message give progressively lower (looser) bounds, which only
+        # corrupt the density calculation.  Keeping only the highest candidate per
+        # message prevents stale detections from forming false dense clusters.
+        best_per_msg: Dict[str, int] = {}
+        frames_sampled = 0
+        consecutive_failures = 0
+        # Belt-and-suspenders against a bad duration estimate (e.g. probing
+        # failed and the OpenCV frame count was still garbage): give up
+        # rather than seek-and-fail through the rest of a bogus sample list.
+        _MAX_CONSECUTIVE_FAILURES = 20
 
-    sample_seconds = list(range(0, duration, sample_interval))
-    total_samples = len(sample_seconds)
-    start_time = time.monotonic()
-    for sample_num, video_sec in enumerate(sample_seconds, start=1):
-        if cancel_event is not None and cancel_event.is_set():
-            cap.release()
-            raise RuntimeError("__cancelled__")
-        frame_number = int(video_sec * fps)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-        ret, frame = cap.read()
-        if not ret:
-            continue
+        sample_seconds = list(range(0, max(duration, 0), sample_interval))
+        total_samples = len(sample_seconds)
+        start_time = time.monotonic()
+        for sample_num, video_sec in enumerate(sample_seconds, start=1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("__cancelled__")
+            frame_number = int(video_sec * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            if not ret:
+                consecutive_failures += 1
+                if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                    if verbose:
+                        print(
+                            f"  Stopping early: {consecutive_failures} consecutive "
+                            "unreadable samples (likely an unfinalized/corrupt video)."
+                        )
+                    break
+                continue
+            consecutive_failures = 0
 
-        frames_sampled += 1
-        region = crop_chat_region(frame, *chat_region)
-        del frame
-        ocr_text = run_ocr_on_region(region)
-        norm_ocr = _normalize(ocr_text)
+            frames_sampled += 1
+            region = np.ascontiguousarray(crop_chat_region(frame, *chat_region))
+            del frame
+            ocr_text = run_ocr_on_region(region)
+            norm_ocr = _normalize(ocr_text)
 
-        for norm_msg, game_sec in unique_msgs.items():
-            if norm_msg in norm_ocr:
-                t0_candidate = game_sec - video_sec
-                # Handle midnight wrap (log spans 23:xx → 00:xx UTC)
-                if t0_candidate < -3600:
-                    t0_candidate += 86400
-                if verbose:
-                    print(f"    [{video_sec:5d}s] '{norm_msg[:50]}' → t0={t0_candidate}")
-                # Keep only the highest candidate for this message (first appearance).
-                if norm_msg not in best_per_msg or t0_candidate > best_per_msg[norm_msg]:
-                    best_per_msg[norm_msg] = t0_candidate
+            for norm_msg, game_sec in unique_msgs.items():
+                if norm_msg in norm_ocr:
+                    t0_candidate = game_sec - video_sec
+                    # Handle midnight wrap (log spans 23:xx → 00:xx UTC)
+                    if t0_candidate < -3600:
+                        t0_candidate += 86400
+                    if verbose:
+                        print(f"    [{video_sec:5d}s] '{norm_msg[:50]}' → t0={t0_candidate}")
+                    # Keep only the highest candidate for this message (first appearance).
+                    if norm_msg not in best_per_msg or t0_candidate > best_per_msg[norm_msg]:
+                        best_per_msg[norm_msg] = t0_candidate
 
-        if not verbose:
-            elapsed = time.monotonic() - start_time
-            pct = sample_num / total_samples
-            if progress_callback is not None:
-                progress_callback(sample_num, total_samples)
-            else:
-                filled = int(30 * pct)
-                bar = "#" * filled + "-" * (30 - filled)
-                eta_str = ""
-                if sample_num > 1 and elapsed > 0:
-                    remaining = (total_samples - sample_num) * elapsed / sample_num
-                    m, s = divmod(int(remaining), 60)
-                    eta_str = f"  ETA {m}:{s:02d}"
-                sys.stdout.write(f"\r  [{bar}] {pct*100:5.1f}%  {sample_num}/{total_samples}{eta_str}  ")
-                sys.stdout.flush()
+            if not verbose:
+                elapsed = time.monotonic() - start_time
+                pct = sample_num / total_samples
+                if progress_callback is not None:
+                    progress_callback(sample_num, total_samples)
+                else:
+                    filled = int(30 * pct)
+                    bar = "#" * filled + "-" * (30 - filled)
+                    eta_str = ""
+                    if sample_num > 1 and elapsed > 0:
+                        remaining = (total_samples - sample_num) * elapsed / sample_num
+                        m, s = divmod(int(remaining), 60)
+                        eta_str = f"  ETA {m}:{s:02d}"
+                    sys.stdout.write(f"\r  [{bar}] {pct*100:5.1f}%  {sample_num}/{total_samples}{eta_str}  ")
+                    sys.stdout.flush()
 
-    if not verbose and progress_callback is None:
-        sys.stdout.write("\n")
-
-    cap.release()
+        if not verbose and progress_callback is None:
+            sys.stdout.write("\n")
+    finally:
+        cap.release()
 
     if not best_per_msg:
         x1, y1, x2, y2 = chat_region

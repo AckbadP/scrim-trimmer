@@ -320,6 +320,71 @@ class TestDetectT0:
         finally:
             os.unlink(path)
 
+    # -- unfinalized/inflated frame count does not spin forever --------------
+
+    def test_bogus_frame_count_terminates_instead_of_spinning(self):
+        # Simulates an in-progress recording: OpenCV's frame count is wildly
+        # inflated (no valid container index yet) and every read past the
+        # real content fails. Without the consecutive-failure bailout this
+        # would seek-and-fail through millions of samples instead of
+        # returning promptly.
+        path = self._write_detect_log()
+        try:
+            cap_mock = mock.MagicMock()
+            cap_mock.isOpened.return_value = True
+            # CAP_PROP_FPS=5 → 30.0, CAP_PROP_FRAME_COUNT=7 → wildly inflated
+            cap_mock.get.side_effect = lambda prop: 30.0 if prop == 5 else 100_000_000
+            cap_mock.read.return_value = (False, None)  # every sample fails
+            blank = np.zeros((100, 100, 3), dtype=np.uint8)
+            with mock.patch("log_matcher.cv2.VideoCapture", return_value=cap_mock), \
+                 mock.patch("log_matcher.crop_chat_region", return_value=blank), \
+                 mock.patch("log_matcher.run_ocr_on_region", return_value=""), \
+                 mock.patch("log_matcher.probe_duration", return_value=None):
+                try:
+                    detect_t0([path], "fake.mp4", sample_interval=30)
+                    assert False, "Expected RuntimeError (no matches)"
+                except RuntimeError as exc:
+                    assert "__cancelled__" not in str(exc)
+            # The bailout must have kicked in well short of the full
+            # (duration / sample_interval) sample count.
+            assert cap_mock.set.call_count < 1000
+        finally:
+            os.unlink(path)
+
+    def test_prefers_probed_duration_over_frame_count(self):
+        # probe_duration should be used ahead of OpenCV's frame-count math
+        # whenever it succeeds, since the frame count is unreliable on an
+        # unfinalized file.
+        path = self._write_detect_log()
+        try:
+            cap_mock = _make_cap_mock(fps=1.0, total_frames=100_000_000)
+            blank = np.zeros((100, 100, 3), dtype=np.uint8)
+            with mock.patch("log_matcher.cv2.VideoCapture", return_value=cap_mock), \
+                 mock.patch("log_matcher.crop_chat_region", return_value=blank), \
+                 mock.patch("log_matcher.run_ocr_on_region", return_value="we are ready to fight"), \
+                 mock.patch("log_matcher.probe_duration", return_value=60.0):
+                t0 = detect_t0([path], "fake.mp4", sample_interval=30)
+            # duration=60 → samples at 0, 30 → t0 = 4069 - 0 = 4069
+            assert t0 == 4069
+        finally:
+            os.unlink(path)
+
+    def test_zero_fps_raises_value_error_and_releases_cap(self):
+        path = self._write_detect_log()
+        try:
+            cap_mock = mock.MagicMock()
+            cap_mock.isOpened.return_value = True
+            cap_mock.get.side_effect = lambda prop: 0.0 if prop == 5 else 100
+            with mock.patch("log_matcher.cv2.VideoCapture", return_value=cap_mock):
+                try:
+                    detect_t0([path], "fake.mp4")
+                    assert False, "Expected ValueError"
+                except ValueError as exc:
+                    assert "Invalid FPS" in str(exc)
+            cap_mock.release.assert_called_once()
+        finally:
+            os.unlink(path)
+
     # -- verbose output covers print branches (lines 114, 160, 197) ---------
 
     def test_verbose_mode(self, capsys):

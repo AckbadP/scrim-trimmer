@@ -2,11 +2,17 @@
 Tests for video_clipper.py — extract_clip, stitch_clips, create_clips.
 
 subprocess.run is mocked so no real ffmpeg or video files are needed.
+Cancellation tests mock subprocess.Popen instead (the cancel-aware code path
+never calls subprocess.run), except for one real-process test that verifies
+the actual terminate/kill mechanics.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
+import threading
+import time
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -285,3 +291,137 @@ class TestForcePythonInfoPrint:
             stitch_clips(["a.mp4", "b.mp4"], "out.mp4")
         out = capsys.readouterr().out
         assert "[info]" in out
+
+
+# ---------------------------------------------------------------------------
+# -nostdin / stdin=DEVNULL — an ffmpeg inheriting an interactive stdin can
+# otherwise wait on it forever (see force_ffmpeg fixture at module top).
+# ---------------------------------------------------------------------------
+
+class TestFfmpegStdinIsolation:
+    def test_extract_clip_uses_nostdin_and_devnull(self):
+        with patch("subprocess.run", return_value=_ok()) as mock_run:
+            extract_clip("in.mp4", 0, 10, "out.mp4")
+        cmd = mock_run.call_args[0][0]
+        assert "-nostdin" in cmd
+        assert mock_run.call_args.kwargs.get("stdin") == subprocess.DEVNULL
+
+    def test_stitch_clips_uses_nostdin_and_devnull(self):
+        with patch("subprocess.run", return_value=_ok()) as mock_run:
+            stitch_clips(["a.mp4"], "out.mp4")
+        cmd = mock_run.call_args[0][0]
+        assert "-nostdin" in cmd
+        assert mock_run.call_args.kwargs.get("stdin") == subprocess.DEVNULL
+
+
+# ---------------------------------------------------------------------------
+# Cancellation — cancel_event routes through _run_ffmpeg's Popen-based path,
+# never subprocess.run, so these tests mock Popen (or use a real short-lived
+# process for the one true end-to-end check).
+# ---------------------------------------------------------------------------
+
+def _fake_popen(returncode=0, stdout="", stderr=""):
+    proc = MagicMock()
+    proc.communicate.return_value = (stdout, stderr)
+    proc.returncode = returncode
+    return proc
+
+
+class TestCancellation:
+    def test_extract_clip_raises_cancelled_when_event_preset(self, monkeypatch):
+        # Event already set before ffmpeg's first poll — must cancel on the
+        # very first iteration rather than waiting out a full timeout cycle.
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        proc = MagicMock()
+        proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="ffmpeg", timeout=video_clipper._POLL_INTERVAL),
+            ("", ""),  # the drain after terminate()
+        ]
+        with patch("subprocess.Popen", return_value=proc):
+            with pytest.raises(RuntimeError, match="__cancelled__"):
+                extract_clip("in.mp4", 0, 10, "out.mp4", cancel_event=cancel_event)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_not_called()
+
+    def test_cancel_escalates_to_kill_if_terminate_does_not_exit(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        proc = MagicMock()
+        proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="ffmpeg", timeout=video_clipper._POLL_INTERVAL),
+            subprocess.TimeoutExpired(cmd="ffmpeg", timeout=5),  # terminate() didn't work
+            ("", ""),  # final drain after kill()
+        ]
+        with patch("subprocess.Popen", return_value=proc):
+            with pytest.raises(RuntimeError, match="__cancelled__"):
+                video_clipper._run_ffmpeg(["ffmpeg", "-y"], cancel_event=cancel_event)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_called_once()
+
+    def test_create_clips_stops_between_clips_when_cancelled(self):
+        # Cancelled after the first clip finishes: the second and third
+        # clips must never be attempted, and Cancel must not silently no-op.
+        cancel_event = threading.Event()
+        calls = []
+
+        def _popen_side_effect(cmd, **kw):
+            calls.append(cmd)
+            cancel_event.set()  # simulate Cancel firing right after clip 1
+            return _fake_popen(returncode=0)
+
+        with patch("subprocess.Popen", side_effect=_popen_side_effect):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with pytest.raises(RuntimeError, match="__cancelled__"):
+                    create_clips(
+                        "in.mp4", [(0, 10), (20, 30), (40, 50)], tmpdir,
+                        cancel_event=cancel_event,
+                    )
+        assert len(calls) == 1
+
+    def test_create_clips_status_callback_invoked_per_clip(self):
+        messages = []
+        with patch("subprocess.run", return_value=_ok()):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                create_clips(
+                    "in.mp4", [(0, 10), (20, 30)], tmpdir,
+                    status_callback=messages.append,
+                )
+        assert len(messages) == 2
+        assert "1/2" in messages[0]
+        assert "2/2" in messages[1]
+
+    def test_real_process_is_actually_killed_on_cancel(self, monkeypatch):
+        # End-to-end check of the polling/terminate/kill mechanics against a
+        # real child process (a short python sleep, portable across
+        # platforms) rather than a mock — this is the actual guarantee the
+        # fix provides: Cancel must not leave a wedged process behind.
+        created = {}
+        real_popen = subprocess.Popen
+
+        def _tracking_popen(*a, **kw):
+            p = real_popen(*a, **kw)
+            created["proc"] = p
+            return p
+
+        monkeypatch.setattr(subprocess, "Popen", _tracking_popen)
+
+        cancel_event = threading.Event()
+
+        def _cancel_soon():
+            time.sleep(0.3)
+            cancel_event.set()
+
+        threading.Thread(target=_cancel_soon, daemon=True).start()
+
+        cmd = [sys.executable, "-c", "import time; time.sleep(30)"]
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match="__cancelled__"):
+            video_clipper._run_ffmpeg(cmd, cancel_event=cancel_event)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 10, "cancellation should abort well before the 30s sleep completes"
+        time.sleep(0.2)
+        assert created["proc"].poll() is not None, "child process must not be left running"

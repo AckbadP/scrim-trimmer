@@ -18,7 +18,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Tuple
 
-from frame_extractor import extract_frames, get_video_duration
+import numpy as np
+
+from frame_extractor import check_source_video, extract_frames, get_video_duration
 from ocr_processor import crop_chat_region, run_ocr_on_region
 from chat_analyzer import analyze_frames, pair_cd_wf
 from chat_log_parser import parse_chat_logs, game_time_to_seconds
@@ -37,6 +39,16 @@ class MissingDependencyError(Exception):
     def __init__(self, tool: str, message: str):
         super().__init__(message)
         self.tool = tool
+
+
+class UnfinalizedSourceError(Exception):
+    """
+    Raised when the source video looks like it is still being written (e.g.
+    the game client / recorder is still running) or is otherwise missing a
+    valid container index. Processing such a file is unreliable and can
+    make clip extraction extremely slow or hang-looking; the GUI offers to
+    proceed anyway, which re-invokes the pipeline with `force_unfinalized`.
+    """
 
 
 def _check_cancel(args):
@@ -336,6 +348,16 @@ def run(args) -> None:
         print(f"Error: video file not found: {args.video}", file=sys.stderr)
         sys.exit(1)
 
+    if not getattr(args, "force_unfinalized", False):
+        _notify("Checking source video...")
+        warning = check_source_video(args.video)
+        if warning:
+            if _status_cb is not None:
+                # Running under the GUI — let it ask the user whether to
+                # proceed rather than deciding unilaterally.
+                raise UnfinalizedSourceError(warning)
+            print(f"Warning: {warning}", file=sys.stderr)
+
     output_dir = args.output
     os.makedirs(output_dir, exist_ok=True)
 
@@ -401,13 +423,22 @@ def run(args) -> None:
         _check_cancel(args)
         _notify(f"Extracting {len(pairs)} clip(s)...")
         print(f"\n[2/4] Extracting {len(pairs)} clip(s)...")
-        clip_paths = create_clips(args.video, pairs, output_dir)
+        try:
+            clip_paths = create_clips(
+                args.video, pairs, output_dir,
+                cancel_event=getattr(args, "cancel_event", None),
+                status_callback=_notify,
+            )
 
-        final_output = os.path.join(output_dir, "final_output.mp4")
-        _check_cancel(args)
-        _notify("Stitching clips...")
-        print(f"\n[3/4] Stitching clips into {final_output}...")
-        stitch_clips(clip_paths, final_output)
+            final_output = os.path.join(output_dir, "final_output.mp4")
+            _check_cancel(args)
+            _notify("Stitching clips...")
+            print(f"\n[3/4] Stitching clips into {final_output}...")
+            stitch_clips(clip_paths, final_output, cancel_event=getattr(args, "cancel_event", None))
+        except RuntimeError as e:
+            if str(e) == "__cancelled__":
+                raise CancelledError("Cancelled by user")
+            raise
 
         for clip in clip_paths:
             os.remove(clip)
@@ -435,31 +466,64 @@ def run(args) -> None:
     results: dict = {}
     results_lock = threading.Lock()
     completed_count = [0]
+    failed_count = [0]
     sem: threading.Semaphore | None = None
 
     def _make_callback(s: int):
         def callback(fut):
-            with results_lock:
-                results[s] = fut.result()
-                completed_count[0] += 1
-                if not args.verbose:
-                    elapsed = time.monotonic() - start_time
-                    sys.stdout.write(_progress_bar(completed_count[0], duration, elapsed))
-                    sys.stdout.flush()
-            sem.release()
+            # `finally: sem.release()` is load-bearing — if a worker raises
+            # (bad frame, tesseract timeout, etc.) and we skip the release,
+            # the producer eventually deadlocks forever at sem.acquire().
+            try:
+                with results_lock:
+                    exc = fut.exception()
+                    if exc is not None:
+                        results[s] = ""
+                        failed_count[0] += 1
+                    else:
+                        results[s] = fut.result()
+                    completed_count[0] += 1
+                    if not args.verbose:
+                        elapsed = time.monotonic() - start_time
+                        sys.stdout.write(_progress_bar(completed_count[0], duration, elapsed))
+                        sys.stdout.flush()
+            finally:
+                sem.release()
         return callback
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    executor = ThreadPoolExecutor(max_workers=workers)
+    try:
         for second, frame in extract_frames(args.video):
             _check_cancel(args)
-            region = crop_chat_region(frame, *args.chat_region)
+            # Copy the crop out of the full-frame numpy view: `region.base`
+            # would otherwise keep the *entire* decoded frame alive, so the
+            # in-flight cap below (sized from region.nbytes) would be
+            # accounting for ~1/10th of the memory actually retained.
+            region = np.ascontiguousarray(crop_chat_region(frame, *args.chat_region))
             del frame
             if sem is None:
                 ram_cap_bytes = (getattr(args, "ram_cap_gb", None) or 10) * 1024 ** 3
+                try:
+                    import psutil
+                    available_bytes = psutil.virtual_memory().available
+                    ram_cap_bytes = min(ram_cap_bytes, int(available_bytes * 0.5))
+                except ImportError:
+                    pass
                 max_in_flight = max(workers * 2, int(ram_cap_bytes // region.nbytes))
+                print(
+                    f"  [info] OCR concurrency cap: {max_in_flight} frame(s) in flight "
+                    f"(~{max_in_flight * region.nbytes / 1024 ** 3:.2f} GB)"
+                )
                 sem = threading.Semaphore(max_in_flight)
             sem.acquire()
             executor.submit(run_ocr_on_region, region).add_done_callback(_make_callback(second))
+    except BaseException:
+        # Cancel (or any other failure) mid-extraction: drop queued work
+        # instead of waiting for it to drain, so Cancel is actually fast.
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown(wait=True)
 
     elapsed = time.monotonic() - start_time
     frame_texts = sorted(results.items())
@@ -472,6 +536,8 @@ def run(args) -> None:
 
     rate = len(frame_texts) / elapsed if elapsed > 0 else 0
     print(f"  Done. {len(frame_texts)} frames in {_fmt_duration(elapsed)} ({rate:.1f} fps)")
+    if failed_count[0]:
+        print(f"  Warning: {failed_count[0]} frame(s) failed OCR and were skipped", file=sys.stderr)
 
     _check_cancel(args)
 
@@ -499,14 +565,23 @@ def run(args) -> None:
     _check_cancel(args)
     _notify(f"Extracting {len(pairs)} clip(s)...")
     print(f"\n[3/4] Extracting {len(pairs)} clip(s)...")
-    clip_paths = create_clips(args.video, pairs, output_dir)
+    try:
+        clip_paths = create_clips(
+            args.video, pairs, output_dir,
+            cancel_event=getattr(args, "cancel_event", None),
+            status_callback=_notify,
+        )
 
-    # Step 5: Stitch clips
-    _check_cancel(args)
-    final_output = os.path.join(output_dir, "final_output.mp4")
-    _notify("Stitching clips...")
-    print(f"\n[4/4] Stitching clips into {final_output}...")
-    stitch_clips(clip_paths, final_output)
+        # Step 5: Stitch clips
+        _check_cancel(args)
+        final_output = os.path.join(output_dir, "final_output.mp4")
+        _notify("Stitching clips...")
+        print(f"\n[4/4] Stitching clips into {final_output}...")
+        stitch_clips(clip_paths, final_output, cancel_event=getattr(args, "cancel_event", None))
+    except RuntimeError as e:
+        if str(e) == "__cancelled__":
+            raise CancelledError("Cancelled by user")
+        raise
 
     for clip in clip_paths:
         os.remove(clip)
