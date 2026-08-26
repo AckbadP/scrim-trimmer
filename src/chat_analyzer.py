@@ -249,6 +249,93 @@ def _merge_close_events(timestamps: List[int], window: int) -> List[int]:
     return result
 
 
+# --- Bare-countdown detection (OCR mode) --------------------------------
+# Mirrors chat_log_parser.find_countdown_starts: some callers skip the "CD"
+# announcement and go straight to counting down ("10", "9", "8", ...), so
+# there is no start marker to pair against the round's WF.  See that
+# module's module docstring for the rationale; the thresholds below are
+# kept identical so behaviour matches between log mode and OCR mode.
+_MIN_COUNTDOWN_LEN = 4
+_MAX_COUNTDOWN_GAP_SEC = 6
+_MIN_COUNTDOWN_START = 8
+_COUNTDOWN_CD_DEDUPE = 30
+
+_BARE_NUMBER_RE = re.compile(r'^\s*(\d{1,2})\s*$')
+
+
+def _check_line_for_countdown(line: str) -> "int | None":
+    """Return the integer value if the message (after the separator) is a
+    bare number 0-10, else None."""
+    sep_pos = -1
+    for sep in (">", "»"):
+        pos = line.rfind(sep)
+        if pos > sep_pos:
+            sep_pos = pos
+    if sep_pos == -1:
+        return None
+    m = _BARE_NUMBER_RE.match(line[sep_pos + 1:])
+    if not m:
+        return None
+    n = int(m.group(1))
+    return n if 0 <= n <= 10 else None
+
+
+def _detect_countdown_no_sep(line: str) -> "int | None":
+    """Like _detect_command_no_sep, but for a bare-number countdown line
+    that lacks a '>' separator (the common two-line OCR wrap)."""
+    stripped = line.strip()
+    if not stripped or len(stripped) > _MAX_NO_SEP_LINE_LEN:
+        return None
+    if '>' in stripped or '»' in stripped:
+        return None
+    m = _BARE_NUMBER_RE.match(stripped)
+    if not m:
+        return None
+    n = int(m.group(1))
+    return n if 0 <= n <= 10 else None
+
+
+def _find_countdown_cd_starts(records: List[Tuple[int, int, int]]) -> List[Tuple[int, int]]:
+    """
+    Given (video_second, game_ts_secs, value) records in video-chronological
+    order, return (video_second, game_ts_secs) of the first message of each
+    qualifying countdown run.
+
+    Unlike chat_log_parser.find_countdown_starts (which groups by the exact
+    log timestamp — ground truth there), grouping here is anchored to VIDEO
+    time rather than the OCR'd game timestamp. A chat message that lingers
+    on screen for many seconds gets re-read by OCR on later, unrelated
+    frames with an increasingly garbled timestamp; those echoes can drift
+    game-time-wise into looking like a fresh descending run, but they don't
+    cluster in video time the way an actual countdown (~1 message/video-
+    second, since OCR samples at 1 fps) does. Video time is also unaffected
+    by same-player identity, which OCR can't reliably recover.
+    """
+    starts: List[Tuple[int, int]] = []
+    run: List[Tuple[int, int, int]] = []
+
+    def _flush():
+        if len(run) >= _MIN_COUNTDOWN_LEN:
+            starts.append((run[0][0], run[0][1]))
+        run.clear()
+
+    for second, ts_secs, value in records:
+        if run:
+            prev_second, _, prev_value = run[-1]
+            gap = second - prev_second
+            descending = 0 < prev_value - value <= 2
+            if gap > _MAX_COUNTDOWN_GAP_SEC or gap < 0 or not descending:
+                _flush()
+
+        if not run and value < _MIN_COUNTDOWN_START:
+            continue
+
+        run.append((second, ts_secs, value))
+
+    _flush()
+    return starts
+
+
 # Maximum line length for no-separator CD/WF detection.  EVE chat command
 # messages are very short (2-6 chars), but OCR sometimes prepends garbled player
 # alias fragments, keeping the total well under 20 chars.  Longer lines are
@@ -333,6 +420,7 @@ def analyze_frames(
     frame_texts: List[Tuple[int, str]],
     verbose: bool = False,
     tournament_mode: bool = False,
+    detect_countdown: bool = True,
 ) -> Tuple[List[int], List[int]]:
     """
     Scan OCR text from each frame and record video-seconds of new CD/WF events.
@@ -356,6 +444,10 @@ def analyze_frames(
     Args:
         frame_texts: List of (second, ocr_text) tuples in chronological order.
         verbose: If True, print debug info per frame.
+        detect_countdown: When True (and not tournament_mode, and timestamps
+            were seen), also synthesize a CD from a bare descending countdown
+            ("10", "9", "8", ...) for rounds where no "CD" was OCR'd. Only
+            active in carry-forward mode. See _find_countdown_cd_starts().
 
     Returns:
         (cd_timestamps, wf_timestamps): lists of integer seconds.
@@ -369,6 +461,10 @@ def analyze_frames(
     # block a WF with the same garbled carry_ts (e.g. both reading as "01:07:49").
     seen_cd_ts: Set[str] = set()
     seen_wf_ts: Set[str] = set()
+    seen_num_ts: Set[str] = set()
+    # (video_second, game_ts_secs, value) for each bare-number message seen,
+    # used post-loop to find countdown runs.
+    countdown_records: List[Tuple[int, int, int]] = []
     # Video-time of most recently accepted CD, used for minimum-gap WF filtering.
     last_cd_video_sec: int = -1
     # Maximum game-time (total seconds) of all accepted CDs, used for stale-WF
@@ -414,6 +510,17 @@ def analyze_frames(
                         cmd = _detect_command_no_sep(line)
 
                 if not cmd:
+                    if detect_countdown and not tournament_mode and carry_ts is not None:
+                        num = _check_line_for_countdown(line)
+                        if num is None:
+                            num = _detect_countdown_no_sep(line)
+                        # Exact (not fuzzy) dedup key: unlike CD/WF, consecutive
+                        # countdown messages are only ~1s apart in game time —
+                        # well inside _DEDUP_FUZZY_SEC — so fuzzy matching would
+                        # collapse distinct numbers ("10" then "9") into one.
+                        if num is not None and carry_ts not in seen_num_ts:
+                            seen_num_ts.add(carry_ts)
+                            countdown_records.append((second, _ts_to_secs(carry_ts), num))
                     continue
 
                 if carry_ts is not None:
@@ -528,6 +635,20 @@ def analyze_frames(
     # visible for ~30 s, producing many duplicate detections with varying
     # garbled timestamps.  Use a 40 s window to collapse them all into the
     # earliest (first) detection.
+    if has_seen_timestamps and detect_countdown and not tournament_mode and countdown_records:
+        # Already in video-chronological order (appended while scanning
+        # frame_texts, which is itself chronological) — see
+        # _find_countdown_cd_starts for why video time, not game time, is
+        # the grouping key here.
+        for start_second, start_ts_secs in _find_countdown_cd_starts(countdown_records):
+            # Skip a synthetic CD if a real CD was already detected near it —
+            # the round already has an explicit start marker.
+            if any(abs(start_ts_secs - _ts_to_secs(cd_ts)) <= _COUNTDOWN_CD_DEDUPE
+                   for cd_ts in seen_cd_ts):
+                continue
+            cd_timestamps.append(start_second)
+        cd_timestamps.sort()
+
     if has_seen_timestamps:
         cd_merge = 40 if tournament_mode else _CD_MERGE_WINDOW
         cd_timestamps = _merge_close_events(cd_timestamps, cd_merge)

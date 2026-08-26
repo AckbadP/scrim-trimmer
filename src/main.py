@@ -70,6 +70,7 @@ def _warn_orphans(
         print(f"  Warning: {len(orphan_cds)} CD(s) had no matching WF and were skipped: {orphan_cds}", file=sys.stderr)
     if orphan_wfs:
         print(f"  Warning: {len(orphan_wfs)} WF(s) had no preceding CD and were skipped: {orphan_wfs}", file=sys.stderr)
+        print(f"  {len(orphan_wfs)} round(s) had no CD/countdown and were skipped")
 
 
 def _find_windows_tool(name: str) -> "str | None":
@@ -215,6 +216,17 @@ def parse_args():
             "Detect tournament match boundaries instead of CD/WF commands. "
             "Start: 'EVE System > 30 seconds until match start...'. "
             "End: 'EVE System > Match completed!'."
+        ),
+    )
+    parser.add_argument(
+        "--no-detect-countdown",
+        action="store_false",
+        dest="detect_countdown",
+        default=True,
+        help=(
+            "Disable treating a bare descending countdown ('10', '9', '8', ...) "
+            "as an implicit CD. On by default so rounds where the caller skips "
+            "the 'CD' announcement still get a clip start."
         ),
     )
     return parser.parse_args()
@@ -405,7 +417,8 @@ def run(args) -> None:
         print("\n[1/4] Parsing chat log(s)...")
         _tourn = getattr(args, "tournament_match", False)
         cd_times, wf_times = parse_chat_logs(args.chat_logs, t0_sec, duration,
-                                               tournament_mode=_tourn)
+                                               tournament_mode=_tourn,
+                                               detect_countdown=getattr(args, "detect_countdown", True))
         if _tourn:
             wf_times = [min(t + 10, duration) for t in wf_times]
         print(f"  Found {len(cd_times)} CD(s) at: {cd_times}")
@@ -545,8 +558,17 @@ def run(args) -> None:
     _notify("Analyzing chat for CD/WF commands...")
     print("\n[2/4] Analyzing chat for CD/WF commands...")
     _tourn = getattr(args, "tournament_match", False)
+    _detect_countdown = getattr(args, "detect_countdown", True)
+    if _detect_countdown and not _tourn:
+        print(
+            "  [info] Countdown detection is enabled: a bare descending countdown "
+            "('10', '9', '8', ...) is treated as an implicit CD. In OCR mode this "
+            "can produce spurious clip starts from misread digits — disable it in "
+            "Advanced options if clips look wrong."
+        )
     cd_times, wf_times = analyze_frames(frame_texts, verbose=args.verbose,
-                                         tournament_mode=_tourn)
+                                         tournament_mode=_tourn,
+                                         detect_countdown=_detect_countdown)
     if _tourn:
         wf_times = [min(t + 10, duration) for t in wf_times]
     print(f"  Found {len(cd_times)} CD(s) at: {cd_times}")

@@ -26,6 +26,7 @@ from chat_analyzer import (
     _check_line_for_command,
     _merge_close_events,
     _detect_command_no_sep,
+    _COUNTDOWN_CD_DEDUPE,
 )
 
 
@@ -446,6 +447,76 @@ class TestAnalyzeFrames:
         ]
         cd_times, wf_times = analyze_frames(frames)
         assert wf_times == []
+
+
+# ---------------------------------------------------------------------------
+# analyze_frames — bare-countdown detection (OCR mode)
+#
+# Mirrors chat_log_parser's find_countdown_starts: some callers skip the
+# "CD" announcement and count down directly ("10", "9", "8", ...).  In
+# carry-forward (timestamped) mode, analyze_frames should recover a
+# synthetic CD from that run.
+# ---------------------------------------------------------------------------
+
+class TestAnalyzeFramesCountdownDetection:
+    def test_bare_countdown_becomes_synthetic_cd(self):
+        # Numbers accumulate across frames the way real OCR chat does, each
+        # with its own timestamp; no explicit "CD" is ever seen.
+        frames = [
+            (100, "[01:00:00] Player\n> 10"),
+            (101, "[01:00:01] Player\n> 9"),
+            (102, "[01:00:02] Player\n> 8"),
+            (103, "[01:00:03] Player\n> 7"),
+            (104, "[01:00:04] Player\n> 6"),
+            (110, "[01:00:10] Rima\n> WF"),
+        ]
+        cd_times, wf_times = analyze_frames(frames)
+        assert cd_times == [100]  # synthetic CD at the first "10"
+        assert wf_times == [110]
+
+    def test_short_run_does_not_produce_cd(self):
+        # Only 3 numbers — below the minimum countdown length, so no
+        # synthetic CD is produced (the WF itself is still detected; pairing
+        # it is pair_cd_wf's job, and it will find no eligible CD).
+        frames = [
+            (100, "[01:00:00] Player\n> 10"),
+            (101, "[01:00:01] Player\n> 9"),
+            (102, "[01:00:02] Player\n> 8"),
+            (110, "[01:00:10] Rima\n> WF"),
+        ]
+        cd_times, wf_times = analyze_frames(frames)
+        assert cd_times == []
+        assert wf_times == [110]
+        assert pair_cd_wf(cd_times, wf_times) == []
+
+    def test_real_cd_suppresses_synthetic_countdown_cd(self):
+        # An explicit CD is seen shortly before the countdown starts — the
+        # round already has a real start marker, so no synthetic CD should
+        # be added on top of it.
+        frames = [
+            (95, "[00:59:55] Player\n> CD"),
+            (100, "[01:00:00] Player\n> 10"),
+            (101, "[01:00:01] Player\n> 9"),
+            (102, "[01:00:02] Player\n> 8"),
+            (103, "[01:00:03] Player\n> 7"),
+            (110, "[01:00:10] Rima\n> WF"),
+        ]
+        cd_times, wf_times = analyze_frames(frames)
+        assert cd_times == [95]
+        assert wf_times == [110]
+
+    def test_disabled_flag_restores_old_behavior(self):
+        frames = [
+            (100, "[01:00:00] Player\n> 10"),
+            (101, "[01:00:01] Player\n> 9"),
+            (102, "[01:00:02] Player\n> 8"),
+            (103, "[01:00:03] Player\n> 7"),
+            (104, "[01:00:04] Player\n> 6"),
+            (110, "[01:00:10] Rima\n> WF"),
+        ]
+        cd_times, wf_times = analyze_frames(frames, detect_countdown=False)
+        assert cd_times == []
+        assert wf_times == [110]
 
 
 # ---------------------------------------------------------------------------

@@ -114,6 +114,8 @@ class App(TkinterDnD.Tk):
         self.show_debug_popup_var.trace_add("write", self._save_config)
         self.tournament_match_var = tk.BooleanVar(value=bool(_conf.get("tournament_match", False)))
         self.tournament_match_var.trace_add("write", self._save_config)
+        self.detect_countdown_var = tk.BooleanVar(value=bool(_conf.get("detect_countdown", True)))
+        self.detect_countdown_var.trace_add("write", self._save_config)
         self.youtube_upload_var = tk.BooleanVar(value=bool(_conf.get("youtube_upload", False)))
         self.youtube_upload_var.trace_add("write", self._save_config)
         self.youtube_title_var = tk.StringVar(value=cfg.default_youtube_title())
@@ -342,31 +344,42 @@ class App(TkinterDnD.Tk):
         ttk.Checkbutton(adv_tab, variable=self.force_ocr_var).grid(
             row=7, column=1, sticky=tk.W, pady=2)
 
+        # bare-countdown detection
+        ttk.Label(adv_tab, text="Detect bare countdowns as CD").grid(
+            row=8, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Checkbutton(adv_tab, variable=self.detect_countdown_var).grid(
+            row=8, column=1, sticky=tk.W, pady=2)
+        ttk.Label(adv_tab, text="Treat a bare descending countdown ('10', '9', '8', ...) as an\n"
+                                "implicit CD when no 'CD' was typed. In OCR mode this can produce\n"
+                                "spurious clip starts from misread digits.",
+                  foreground="#888", font=("TkDefaultFont", 8)).grid(
+            row=9, column=0, columnspan=2, sticky=tk.W, pady=(0, 4), padx=(0, 8))
+
         # chapter timestamps popup
         ttk.Label(adv_tab, text="Show timestamps popup").grid(
-            row=8, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=10, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.show_chapters_popup_var).grid(
-            row=8, column=1, sticky=tk.W, pady=2)
+            row=10, column=1, sticky=tk.W, pady=2)
 
         # close on complete
         ttk.Label(adv_tab, text="Close when done").grid(
-            row=9, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=11, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.close_on_complete_var).grid(
-            row=9, column=1, sticky=tk.W, pady=2)
+            row=11, column=1, sticky=tk.W, pady=2)
 
         # debug output popup
         ttk.Label(adv_tab, text="Show debug output").grid(
-            row=10, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=12, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.show_debug_popup_var).grid(
-            row=10, column=1, sticky=tk.W, pady=2)
+            row=12, column=1, sticky=tk.W, pady=2)
 
         # YouTube upload
         ttk.Separator(adv_tab, orient=tk.HORIZONTAL).grid(
-            row=11, column=0, columnspan=2, sticky=tk.EW, pady=(8, 4))
+            row=13, column=0, columnspan=2, sticky=tk.EW, pady=(8, 4))
         ttk.Label(adv_tab, text="Upload to YouTube").grid(
-            row=12, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=14, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.youtube_upload_var).grid(
-            row=12, column=1, sticky=tk.W, pady=2)
+            row=14, column=1, sticky=tk.W, pady=2)
 
         _last_nb_content_height = [None]
 
@@ -742,6 +755,7 @@ class App(TkinterDnD.Tk):
             youtube_upload=bool(self.youtube_upload_var.get()),
             youtube_title=self.youtube_title_var.get().strip(),
             tournament_match=bool(self.tournament_match_var.get()),
+            detect_countdown=bool(self.detect_countdown_var.get()),
         )
 
         self._launch_worker(args)
@@ -1156,6 +1170,7 @@ class App(TkinterDnD.Tk):
             "ram_cap_gb": self.ram_cap_var.get(),
             "youtube_upload": bool(self.youtube_upload_var.get()),
             "tournament_match": bool(self.tournament_match_var.get()),
+            "detect_countdown": bool(self.detect_countdown_var.get()),
             "window_geometry": self.winfo_geometry(),
         })
 

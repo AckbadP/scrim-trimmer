@@ -6,7 +6,10 @@ import sys
 import os
 import tempfile
 
-from chat_log_parser import read_chat_log, parse_chat_logs, game_time_to_seconds, _parse_log_line
+from chat_log_parser import (
+    read_chat_log, parse_chat_logs, game_time_to_seconds, _parse_log_line,
+    find_countdown_starts,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -342,5 +345,131 @@ class TestReadChatLogUtf16Fallback:
         try:
             entries = read_chat_log(path)
             assert isinstance(entries, list)
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# find_countdown_starts / detect_countdown
+#
+# Some callers skip the "CD" announcement and go straight to counting down
+# ("10", "9", "8", ...). Without a CD marker, parse_chat_logs would leave the
+# round's WF orphaned and pair_cd_wf would silently drop it.
+# ---------------------------------------------------------------------------
+
+def _entries(messages):
+    """messages: list of (HH:MM:SS, player, text) -> [(datetime, player, msg), ...]"""
+    from datetime import datetime, timezone
+    out = []
+    for ts, player, msg in messages:
+        h, m, s = (int(x) for x in ts.split(':'))
+        out.append((datetime(2026, 3, 25, h, m, s, tzinfo=timezone.utc), player, msg))
+    return out
+
+
+def _countdown_messages(start_ts, player="Daed Alas", start=10, step_sec=1):
+    """Build a clean descending countdown run's (ts, player, msg) tuples."""
+    h, m, s = (int(x) for x in start_ts.split(':'))
+    base = h * 3600 + m * 60 + s
+    out = []
+    for i, n in enumerate(range(start, -1, -1)):
+        secs = base + i * step_sec
+        hh, mm, ss = secs // 3600, (secs % 3600) // 60, secs % 60
+        out.append((f"{hh:02d}:{mm:02d}:{ss:02d}", player, str(n)))
+    return out
+
+
+class TestFindCountdownStarts:
+    def test_clean_run_detected(self):
+        entries = _entries(_countdown_messages("01:31:24"))
+        starts = find_countdown_starts(entries)
+        assert len(starts) == 1
+        assert starts[0].hour == 1 and starts[0].minute == 31 and starts[0].second == 24
+
+    def test_run_with_one_missed_number(self):
+        # 10, 9, 7, 6, ... (8 skipped) — still descending by <= 2, still counts
+        msgs = [m for m in _countdown_messages("01:31:24") if m[2] != "8"]
+        starts = find_countdown_starts(_entries(msgs))
+        assert len(starts) == 1
+
+    def test_short_run_rejected(self):
+        # Only 3 messages ("9","8","7") — below _MIN_COUNTDOWN_LEN, even
+        # though the start value (9) clears _MIN_COUNTDOWN_START.
+        msgs = [("01:31:24", "P", "9"), ("01:31:25", "P", "8"), ("01:31:26", "P", "7")]
+        starts = find_countdown_starts(_entries(msgs))
+        assert starts == []
+
+    def test_ascending_sequence_rejected(self):
+        msgs = [("01:00:00", "P", "1"), ("01:00:01", "P", "2"),
+                ("01:00:02", "P", "3"), ("01:00:03", "P", "4")]
+        starts = find_countdown_starts(_entries(msgs))
+        assert starts == []
+
+    def test_pipe_separated_numbers_not_a_run(self):
+        # "1|2|3|4" is a single message, not four separate ones
+        msgs = [("01:00:00", "P", "1|2|3|4")]
+        starts = find_countdown_starts(_entries(msgs))
+        assert starts == []
+
+    def test_numbers_split_across_two_speakers_rejected(self):
+        msgs = _countdown_messages("01:31:24", player="A")
+        # Interleave a second speaker's numbers so no single speaker has a run
+        msgs = [msgs[0], ("01:31:25", "B", "9"), msgs[2], ("01:31:27", "B", "7")]
+        starts = find_countdown_starts(_entries(msgs))
+        assert starts == []
+
+    def test_gap_too_large_splits_run(self):
+        # First run: 10, 9, 8 (only 3 messages — too short to count).
+        # A 30s gap (past _MAX_COUNTDOWN_GAP_SEC) separates it from a second,
+        # unrelated run: 7, 6, 5, 4, 3, 2, 1, 0 (8 messages — long enough).
+        first = [("01:31:24", "P", "10"), ("01:31:25", "P", "9"), ("01:31:26", "P", "8")]
+        second = _countdown_messages("01:32:00", start=8)  # "01:32:00" .. "01:32:08"
+        starts = find_countdown_starts(_entries(first + second))
+        assert len(starts) == 1
+        assert starts[0].minute == 32 and starts[0].second == 0
+
+
+class TestParseChatLogsCountdownIntegration:
+    def _make_log(self, messages):
+        lines = ["﻿\n Session started: 2026.03.25 00:00:00\n"]
+        for ts, player, msg in messages:
+            lines.append(f"﻿[ 2026.03.25 {ts} ] {player} > {msg}")
+        return _write_log("\n".join(lines))
+
+    def test_bare_countdown_becomes_cd(self):
+        messages = _countdown_messages("01:31:24") + [("01:36:41", "Aaron", "wf")]
+        path = self._make_log(messages)
+        t0 = game_time_to_seconds("01:00:00")
+        try:
+            cd_times, wf_times = parse_chat_logs([path], t0, 7200)
+            assert len(cd_times) == 1
+            assert len(wf_times) == 1
+            # CD at 01:31:24 -> video t = 31:24 = 1884s
+            assert cd_times[0] == 31 * 60 + 24
+        finally:
+            os.unlink(path)
+
+    def test_disabled_flag_restores_old_behavior(self):
+        messages = _countdown_messages("01:31:24") + [("01:36:41", "Aaron", "wf")]
+        path = self._make_log(messages)
+        t0 = game_time_to_seconds("01:00:00")
+        try:
+            cd_times, wf_times = parse_chat_logs([path], t0, 7200, detect_countdown=False)
+            assert len(cd_times) == 0
+            assert len(wf_times) == 1
+        finally:
+            os.unlink(path)
+
+    def test_explicit_cd_suppresses_synthetic_countdown_cd(self):
+        # Caller announces "CD" and then counts down — must produce exactly
+        # one CD, not two.
+        messages = [("01:31:20", "Syss7", "== CD ==")] + _countdown_messages("01:31:24") \
+            + [("01:36:41", "Aaron", "wf")]
+        path = self._make_log(messages)
+        t0 = game_time_to_seconds("01:00:00")
+        try:
+            cd_times, wf_times = parse_chat_logs([path], t0, 7200)
+            assert len(cd_times) == 1
+            assert cd_times[0] == 31 * 60 + 20  # the explicit CD wins
         finally:
             os.unlink(path)

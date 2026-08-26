@@ -28,6 +28,76 @@ _LOG_LINE_RE = re.compile(
 _FIRST_WORD_CD = re.compile(r'^\s*CD\b', re.IGNORECASE)
 _FIRST_WORD_WF = re.compile(r'^\s*WF\b', re.IGNORECASE)
 
+# --- Bare-countdown detection -------------------------------------------
+# Some callers skip the "CD" announcement and go straight to counting down
+# ("10", "9", "8", ...).  Without an explicit CD, parse_chat_logs has no
+# start marker and pair_cd_wf silently drops the round's WF as an orphan.
+# find_countdown_starts() recovers a synthetic CD from these bare-number
+# runs so those rounds still get clipped.
+
+# A countdown run must have at least this many messages to count as one
+# (rules out a single stray number like "1|2|3|4" or a one-off "5").
+_MIN_COUNTDOWN_LEN = 4
+# Consecutive countdown messages more than this many seconds apart are not
+# part of the same run (real countdowns tick roughly once a second).
+_MAX_COUNTDOWN_GAP_SEC = 6
+# The run's first number must be at least this high, so a countdown that's
+# already underway when the log starts doesn't require the very first "10".
+_MIN_COUNTDOWN_START = 8
+# Suppress a synthetic countdown-CD if an explicit CD/COUNTDOWN message
+# appears within this many seconds of it (the caller announced "CD" and
+# then counted down — the explicit CD already marks the start).
+_COUNTDOWN_CD_DEDUPE = 30
+
+
+def find_countdown_starts(
+    entries: List[Tuple[datetime, str, str]],
+) -> List[datetime]:
+    """
+    Scan chronologically-sorted (timestamp, player, message) entries for
+    bare descending-number countdown runs ("10", "9", "8", ...) and return
+    the timestamp of the first message in each qualifying run.
+
+    A run qualifies when it has >= _MIN_COUNTDOWN_LEN messages from the same
+    player, each a bare integer, strictly descending (a single missed
+    number is tolerated), each <= _MAX_COUNTDOWN_GAP_SEC seconds after the
+    previous, and starting at >= _MIN_COUNTDOWN_START.
+    """
+    starts: List[datetime] = []
+    run: List[Tuple[datetime, str, int]] = []  # (ts, player, value)
+
+    def _flush():
+        if len(run) >= _MIN_COUNTDOWN_LEN:
+            starts.append(run[0][0])
+        run.clear()
+
+    for ts, player, msg in entries:
+        word = msg.strip()
+        value: Optional[int] = None
+        if re.fullmatch(r'\d{1,2}', word):
+            n = int(word)
+            if 0 <= n <= 10:
+                value = n
+
+        if value is None:
+            _flush()
+            continue
+
+        if run:
+            prev_ts, prev_player, prev_value = run[-1]
+            gap = (ts - prev_ts).total_seconds()
+            descending = 0 < prev_value - value <= 2
+            if player != prev_player or gap > _MAX_COUNTDOWN_GAP_SEC or gap < 0 or not descending:
+                _flush()
+
+        if not run and value < _MIN_COUNTDOWN_START:
+            continue  # can't start a fresh run too far into the countdown
+
+        run.append((ts, player, value))
+
+    _flush()
+    return starts
+
 
 def _parse_log_line(line: str) -> Optional[Tuple[datetime, str, str]]:
     """Parse a single chat log line; return (timestamp, player, message) or None."""
@@ -59,11 +129,29 @@ def read_chat_log(path: str) -> List[Tuple[datetime, str, str]]:
     return entries
 
 
+def _to_video_seconds(ts: datetime, t0_game_seconds: float, video_duration: float) -> Optional[int]:
+    """
+    Convert a game timestamp to a video second, or None if it falls outside
+    [0, video_duration].  Handles the midnight-wrap case where the log
+    crosses UTC midnight relative to t0.
+    """
+    game_sec = ts.hour * 3600 + ts.minute * 60 + ts.second
+    video_sec = game_sec - t0_game_seconds
+
+    if video_sec < -3600:
+        video_sec += 86400  # add 24 hours
+
+    if video_sec < 0 or video_sec > video_duration:
+        return None
+    return int(video_sec)
+
+
 def parse_chat_logs(
     log_paths: List[str],
     t0_game_seconds: float,
     video_duration: float,
     tournament_mode: bool = False,
+    detect_countdown: bool = True,
 ) -> Tuple[List[int], List[int]]:
     """
     Extract CD and WF video timestamps from EVE chat log files.
@@ -81,6 +169,9 @@ def parse_chat_logs(
             CD/WF player commands.  Start marker: EVE System message containing
             "30 seconds until match start".  End marker: EVE System message
             containing "Match completed!".
+        detect_countdown: When True (and not tournament_mode), also treat a
+            bare descending countdown ("10", "9", "8", ...) as an implicit CD
+            for rounds where no "CD" was typed.  See find_countdown_starts().
 
     Returns:
         (cd_timestamps, wf_timestamps): lists of integer video seconds.
@@ -97,6 +188,7 @@ def parse_chat_logs(
 
     cd_timestamps: List[int] = []
     wf_timestamps: List[int] = []
+    explicit_cd_ts: List[datetime] = []
 
     for ts, player, msg in sorted_entries:
         if tournament_mode:
@@ -122,22 +214,29 @@ def parse_chat_logs(
         if not is_cd and not is_wf:
             continue
 
-        # Convert game timestamp to video seconds.
-        # game_sec = HH*3600 + MM*60 + SS on the UTC date of the log entry.
-        game_sec = ts.hour * 3600 + ts.minute * 60 + ts.second
-        video_sec = game_sec - t0_game_seconds
+        if is_cd:
+            explicit_cd_ts.append(ts)
 
-        # Handle midnight wrap: if game_sec < t0, the log crosses midnight.
-        if video_sec < -3600:
-            video_sec += 86400  # add 24 hours
-
-        if video_sec < 0 or video_sec > video_duration:
+        video_sec = _to_video_seconds(ts, t0_game_seconds, video_duration)
+        if video_sec is None:
             continue
 
         if is_cd:
-            cd_timestamps.append(int(video_sec))
+            cd_timestamps.append(video_sec)
         else:
-            wf_timestamps.append(int(video_sec))
+            wf_timestamps.append(video_sec)
+
+    if detect_countdown and not tournament_mode:
+        for start_ts in find_countdown_starts(sorted_entries):
+            # Skip a synthetic CD if an explicit CD/COUNTDOWN was already
+            # typed near it — the round already has a real start marker.
+            if any(abs((start_ts - cd_ts).total_seconds()) <= _COUNTDOWN_CD_DEDUPE
+                   for cd_ts in explicit_cd_ts):
+                continue
+            video_sec = _to_video_seconds(start_ts, t0_game_seconds, video_duration)
+            if video_sec is not None:
+                cd_timestamps.append(video_sec)
+        cd_timestamps = sorted(set(cd_timestamps))
 
     return cd_timestamps, wf_timestamps
 

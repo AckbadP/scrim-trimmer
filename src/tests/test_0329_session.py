@@ -16,6 +16,7 @@ Case summaries (from test-cases.md):
   Case 4 — WF→CD→WF (pre-rec WF):       CDs=[9],        WFs=[33],           clips=[(9, 33)]
   Case 5 — Multiple CD/WF/GF variants:  CDs=[6..57]×8,  WFs=[65..99]×7,    clips=[(57, 65)]
   Case 6 — CD→WF with random text:      CDs=[22, 73],   WFs=[109, 113],     clips=[(73, 109)]
+  Case 7 — CD→WF, countdown→WF, CD→WF:  CDs=[10, 60*, 120], WFs=[40, 90, 150], clips=3 (* synthetic)
 """
 
 import os
@@ -31,8 +32,8 @@ def _log(n: int) -> str:
     return os.path.join(_RES, f"case{n}.txt")
 
 
-def _parse(n: int, t0: int, duration: int):
-    return parse_chat_logs([_log(n)], t0, duration)
+def _parse(n: int, t0: int, duration: int, **kwargs):
+    return parse_chat_logs([_log(n)], t0, duration, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -252,3 +253,40 @@ class TestCase6LogParsing:
         cds, wfs = _parse(6, self._T0, self._DUR)
         pairs = pair_cd_wf(cds, wfs)
         assert pairs == self._CLIPS, f"Expected {self._CLIPS}, got {pairs}"
+
+
+# ---------------------------------------------------------------------------
+# Case 7 — CD→WF, bare countdown→WF (no CD typed), CD→WF
+#
+# Reproduces the 2026-08-25 AG7 session bug: some rounds skip the "CD"
+# announcement and go straight to counting down.  With countdown detection
+# enabled (the default), the middle round's countdown is recovered as a
+# synthetic CD and all 3 rounds are clipped; disabled, that round's WF is
+# orphaned and only 2 clips are produced.
+# ---------------------------------------------------------------------------
+
+class TestCase7LogParsing:
+    """case7.txt: explicit CD at 10s and 120s; bare countdown starting 60s."""
+
+    _T0, _DUR = 36000, 200  # t0 = 10:00:00
+    _WFS = [40, 90, 150]
+    _CLIPS_ON = [(10, 40), (60, 90), (120, 150)]
+    _CLIPS_OFF = [(10, 40), (120, 150)]
+
+    def test_countdown_enabled_by_default(self):
+        cds, wfs = _parse(7, self._T0, self._DUR)
+        assert cds == [10, 60, 120], f"Expected [10, 60, 120], got {cds}"
+        assert wfs == self._WFS
+
+    def test_clips_with_countdown_detection(self):
+        cds, wfs = _parse(7, self._T0, self._DUR)
+        pairs = pair_cd_wf(cds, wfs)
+        assert pairs == self._CLIPS_ON, f"Expected {self._CLIPS_ON}, got {pairs}"
+
+    def test_clips_without_countdown_detection(self):
+        """Disabling detect_countdown restores the old behaviour: the
+        countdown-only round's WF has no CD and is dropped."""
+        cds, wfs = _parse(7, self._T0, self._DUR, detect_countdown=False)
+        assert cds == [10, 120], f"Expected [10, 120], got {cds}"
+        pairs = pair_cd_wf(cds, wfs)
+        assert pairs == self._CLIPS_OFF, f"Expected {self._CLIPS_OFF}, got {pairs}"

@@ -59,9 +59,13 @@ _DEFAULTS = {
     "chapters_dir": "",  # directory for the YouTube chapters .txt file; empty = same as output_dir
     "show_chapters_popup": True,  # show the timestamps popup window after a job completes
     "close_on_complete": False,  # close the main window when processing finishes successfully
+    "show_debug_popup": False,  # show the OCR/verbose debug console popup
     "chat_region": [0.0, 0.35, 0.15, 1.0],  # [x1, y1, x2, y2] as fractions
     "threads": None,  # None means use os.cpu_count()
+    "ram_cap_gb": 10,  # max GB of decoded frames held in memory at once
     "youtube_upload": False,  # auto-upload final video to YouTube as unlisted after processing
+    "tournament_match": False,  # detect tournament match boundaries instead of CD/WF commands
+    "detect_countdown": True,  # treat a bare descending countdown as an implicit CD
     "window_geometry": "",  # last window geometry string, e.g. "900x700+100+50"
 }
 
