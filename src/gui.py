@@ -857,7 +857,7 @@ class App(TkinterDnD.Tk):
                 sys.stderr = stderr_capture
             try:
                 chapters_text, youtube_url = pipeline.run(args)
-                status_msg = f"Done! Output: {args.output}/final_output.mp4"
+                status_msg = f"Done! Output: {pipeline.output_video_path(args, args.output)}"
                 if youtube_url:
                     status_msg += f"  |  YouTube: {youtube_url}"
                 self.after(0, lambda m=status_msg: self._set_status(m))

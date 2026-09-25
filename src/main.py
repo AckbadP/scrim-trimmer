@@ -11,6 +11,7 @@ Pipeline:
 
 import argparse
 import os
+import re
 import shutil
 import sys
 import threading
@@ -295,6 +296,13 @@ def _progress_bar(current: int, total: int, elapsed: float, width: int = 30) -> 
     return f"\r  [{bar}] {pct*100:5.1f}%  {current}/{total}s{eta_str}  "
 
 
+def output_video_path(args, output_dir: str) -> str:
+    """Final video path: named after the YouTube title (sanitised), else final_output.mp4."""
+    title = (getattr(args, "youtube_title", "") or "").strip()
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", title).strip(" .")
+    return os.path.join(output_dir, f"{name or 'final_output'}.mp4")
+
+
 def _maybe_upload(
     args,
     video_path: str,
@@ -443,7 +451,7 @@ def run(args) -> None:
                 status_callback=_notify,
             )
 
-            final_output = os.path.join(output_dir, "final_output.mp4")
+            final_output = output_video_path(args, output_dir)
             _check_cancel(args)
             _notify("Stitching clips...")
             print(f"\n[3/4] Stitching clips into {final_output}...")
@@ -596,7 +604,7 @@ def run(args) -> None:
 
         # Step 5: Stitch clips
         _check_cancel(args)
-        final_output = os.path.join(output_dir, "final_output.mp4")
+        final_output = output_video_path(args, output_dir)
         _notify("Stitching clips...")
         print(f"\n[4/4] Stitching clips into {final_output}...")
         stitch_clips(clip_paths, final_output, cancel_event=getattr(args, "cancel_event", None))

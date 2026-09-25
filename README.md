@@ -7,6 +7,8 @@ This app was partly vibe coded. While it works well enough, expect bugs. Be care
 
 You should double check your Youtube account's default video upload configuration before using the upload to Youtube feature to ensure you aren't accadentally uploading videos as public. To the best of my knowladge the default is private but you have been warned.
 
+**OneDrive warning (Windows):** Files stored in OneDrive may not be readable by this tool, and you may see "Permission denied" errors. Cloud-only ("Files On-Demand") files, and files OneDrive is currently syncing, can be locked or unavailable. This includes the default EVE chat log location (`Documents\EVE\logs\Chatlogs`), which is often redirected into OneDrive. To avoid problems, copy your videos and chat logs to a local folder outside OneDrive (or right-click them and choose "Always keep on this device"), and set the output directory somewhere outside OneDrive too.
+
 
 ## How it works
 
