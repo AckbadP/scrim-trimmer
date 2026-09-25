@@ -5,6 +5,8 @@ Log and OCR-based video editing tool for EVE Online Alliance Tournament practice
 ## Warning
 This app was partly vibe coded. While it works well enough, expect bugs. Be careful when using the tool, while I have tested it on my personal machine (Ubuntu) to my own satisfaction, it has not been otherwise tested. If you do encounter an error, please raise an issue on GitHub.
 
+You should double check your Youtube account's default video upload configuration before using the upload to Youtube feature to ensure you aren't accadentally uploading videos as public. To the best of my knowladge the default is private but you have been warned.
+
 
 ## How it works
 
