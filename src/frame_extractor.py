@@ -125,6 +125,27 @@ def get_video_duration(video_path: str) -> float:
         cap.release()
 
 
+def is_growing(video_path: str, wait: float = 0.75) -> Optional[bool]:
+    """
+    Return True if video_path's size changes across a `wait`-second window,
+    False if it doesn't, or None if the size couldn't be read at all (e.g.
+    the file no longer exists).
+
+    Size is the reliable signal that a recorder is still writing a file: a
+    recorder like OBS keeps the file open and can keep flushing/finalizing
+    it — advancing its mtime — for a while after the last frame was actually
+    captured, so mtime age is not distinguishable from a genuinely
+    in-progress recording. Size stops changing the moment writes stop.
+    """
+    try:
+        size_before = os.path.getsize(video_path)
+        time.sleep(wait)
+        size_after = os.path.getsize(video_path)
+    except OSError:
+        return None
+    return size_after > size_before
+
+
 def check_source_video(video_path: str, grow_check_wait: float = 1.5) -> Optional[str]:
     """
     Sanity-check a source video before starting a long pipeline run.
@@ -138,13 +159,10 @@ def check_source_video(video_path: str, grow_check_wait: float = 1.5) -> Optiona
     theoretically finish between the two duration checks below. It exists to
     catch the common case cheaply, not to be authoritative.
     """
-    try:
-        size_before = os.path.getsize(video_path)
-        time.sleep(grow_check_wait)
-        size_after = os.path.getsize(video_path)
-    except OSError:
+    growing = is_growing(video_path, wait=grow_check_wait)
+    if growing is None:
         return None
-    if size_after > size_before:
+    if growing:
         return (
             "The source video appears to still be growing (it changed size "
             f"in the last {grow_check_wait:.1f}s) — the recorder may still be "

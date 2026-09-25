@@ -57,13 +57,14 @@ except ImportError as e:
     print("Install prerequisites: pip install opencv-python pillow")
     sys.exit(1)
 
-from frame_extractor import get_video_duration
+from frame_extractor import get_video_duration, is_growing
 import main as pipeline
 import native_dialogs
 
 
 VALID_EXTENSIONS = {".mp4", ".mkv"}
 THUMB_W, THUMB_H = 320, 180
+VIDEO_POLL_INTERVAL_MS = 5000  # how often to re-check the default video dir for a newer recording
 
 _DEFAULT_REGION = [0.0, 0.35, 0.15, 1.0]  # [x1, y1, x2, y2] as fractions
 
@@ -76,6 +77,11 @@ class App(TkinterDnD.Tk):
         self.resizable(True, True)
 
         self.video_path: str | None = None
+        # True while the current selection came from auto-load rather than the
+        # user explicitly picking a file (Browse/drag-drop) — only then do we
+        # keep re-scanning the default video dir for a newer recording.
+        self._auto_video = True
+        self._video_poll_after_id = None
         self._thumb_ref = None  # prevent GC of PhotoImage
         self._thumb_pil: Image.Image | None = None  # source image for re-rendering on resize
         self._cancel_event = threading.Event()
@@ -127,12 +133,14 @@ class App(TkinterDnD.Tk):
             self.geometry(saved_geom)
         self.bind("<Configure>", self._on_window_configure)
 
-        # Auto-load most recent video if a default video directory is configured
+        # Auto-load most recent video if a default video directory is configured.
+        # The scan samples file size to tell a still-recording file apart from a
+        # finished one (see _find_latest_video), so it can block briefly — run it
+        # off the main thread so it never delays showing the window.
         video_dir = os.path.expanduser(self.default_video_dir_var.get().strip())
         if video_dir and os.path.isdir(video_dir):
-            latest = self._find_latest_video(video_dir)
-            if latest:
-                self._load_video(latest)
+            self._scan_latest_video_async(video_dir)
+        self._schedule_video_poll()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -479,9 +487,7 @@ class App(TkinterDnD.Tk):
         d = native_dialogs.askdirectory(title="Select default video directory")
         if d:
             self.default_video_dir_var.set(d)
-            latest = self._find_latest_video(d)
-            if latest:
-                self._load_video(latest)
+            self._scan_latest_video_async(d)
 
     def _browse_default_log_dir(self):
         d = native_dialogs.askdirectory(title="Select default log directory")
@@ -502,18 +508,32 @@ class App(TkinterDnD.Tk):
     # Video loading + thumbnail
     # ------------------------------------------------------------------
 
-    def _load_video(self, path: str):
+    def _load_video(self, path: str, auto: bool = False, skipped: str | None = None):
+        """
+        Load path as the active video.
+
+        auto marks the load as coming from the default-video-dir auto-selection
+        rather than an explicit user choice (Browse/drag-drop); only an auto
+        load keeps the periodic re-scan (_poll_latest_video) armed. skipped, if
+        given, is the basename of a newer file in the same dir that was passed
+        over because it looked still-in-progress — surfaced in the status line.
+        """
         ext = os.path.splitext(path)[1].lower()
         if ext not in VALID_EXTENSIONS:
+            if auto:
+                return
             messagebox.showerror("Invalid file",
                                  f"Unsupported file type '{ext}'.\nExpected .mp4 or .mkv.")
             return
 
         if not os.path.isfile(path):
+            if auto:
+                return
             messagebox.showerror("File not found", f"Cannot find:\n{path}")
             return
 
         self.video_path = path
+        self._auto_video = auto
 
         # Thumbnail
         pil = self._extract_thumbnail(path)
@@ -571,7 +591,8 @@ class App(TkinterDnD.Tk):
                 except Exception as exc:
                     status_log = f"  |  Log error: {exc}"
 
-        self._set_status(f"Loaded: {os.path.basename(path)}{status_log}")
+        status_skip = f"  |  skipped {skipped} (still recording)" if skipped else ""
+        self._set_status(f"Loaded: {os.path.basename(path)}{status_log}{status_skip}")
 
     def _extract_thumbnail(self, path: str) -> Image.Image | None:
         try:
@@ -880,6 +901,7 @@ class App(TkinterDnD.Tk):
 
     def _reset(self):
         self.video_path = None
+        self._auto_video = True  # resume following the default video dir's latest recording
         self._thumb_ref = None
         self._thumb_pil = None
         self._img_rect = None
@@ -1175,15 +1197,20 @@ class App(TkinterDnD.Tk):
         })
 
     @staticmethod
-    def _find_latest_video(video_dir: str) -> str | None:
+    def _find_latest_video(video_dir: str) -> tuple[str | None, str | None]:
         """
-        Return the path of the most recently modified video file in video_dir.
+        Return (path, skipped) for the most recently modified *finished*
+        video file in video_dir.
 
-        Prefers a file whose mtime is more than ~10s old: a very fresh mtime
-        usually means the recorder (e.g. the game client) is still actively
-        writing it, and auto-loading that file would default the pipeline
-        onto an in-progress recording. Falls back to the newest file if
-        that's genuinely the only candidate.
+        A candidate is treated as still being written by sampling its size
+        (see frame_extractor.is_growing), not by mtime age: a recorder can
+        keep flushing/finalizing a large file — advancing its mtime — for
+        well over a minute after the user stops recording, so a fresh mtime
+        alone doesn't mean the file is still in progress. Falls back to the
+        newest candidate if every candidate looks like it's still growing.
+
+        skipped is the basename of the newest candidate, when it was passed
+        over for looking still-in-progress; otherwise None.
         """
         candidates = [
             os.path.join(video_dir, f)
@@ -1192,13 +1219,67 @@ class App(TkinterDnD.Tk):
             and os.path.isfile(os.path.join(video_dir, f))
         ]
         if not candidates:
-            return None
+            return None, None
         candidates.sort(key=os.path.getmtime, reverse=True)
-        now = time.time()
         for path in candidates:
-            if now - os.path.getmtime(path) > 10:
-                return path
-        return candidates[0]
+            if not is_growing(path):
+                skipped = os.path.basename(candidates[0]) if path != candidates[0] else None
+                return path, skipped
+        return candidates[0], None
+
+    def _scan_latest_video_async(self, video_dir: str):
+        """
+        Run _find_latest_video off the main thread and, if it finds something,
+        load it as an auto-selection back on the Tk thread.
+
+        The scan samples file size (see is_growing) to decide whether the
+        newest file is still being recorded, which can block for up to
+        ~1.5s per busy candidate — doing that on the main thread would delay
+        showing the window or freeze the UI mid-poll.
+        """
+        def worker():
+            try:
+                path, skipped = self._find_latest_video(video_dir)
+            except OSError:
+                return
+            # Skip a reload when the scan just confirms the current selection —
+            # matters for the periodic poll, which would otherwise re-extract
+            # the thumbnail and re-match the chat log every tick for no reason.
+            if path and path != self.video_path and self.winfo_exists():
+                self.after(0, lambda: self._load_video(path, auto=True, skipped=skipped))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _schedule_video_poll(self):
+        self._video_poll_after_id = self.after(VIDEO_POLL_INTERVAL_MS, self._poll_latest_video)
+
+    def _poll_latest_video(self):
+        """
+        Periodically re-scan the default video dir for a newer recording.
+
+        Stops rescanning once the user has explicitly picked a video
+        (Browse/drag-drop) or a job is running — see the `auto` flag threaded
+        through _load_video. Reset (`_reset`) re-arms it rather than stopping
+        it, since Reset is "go back to following the default dir," not "stop
+        following it."
+        """
+        self._video_poll_after_id = None
+        # A pending `after` callback can still fire after close_on_complete
+        # destroys the window (self.after(0, self.destroy) in the run-worker
+        # completion handler) — bail out before touching any widget.
+        if not self.winfo_exists():
+            return
+        try:
+            if not self._auto_video or str(self.cancel_btn.cget("state")) != "disabled":
+                # cancel_btn is only enabled while a pipeline job is running.
+                return
+            video_dir = os.path.expanduser(self.default_video_dir_var.get().strip())
+            if not video_dir or not os.path.isdir(video_dir):
+                return
+            self._scan_latest_video_async(video_dir)
+        finally:
+            if self.winfo_exists():
+                self._schedule_video_poll()
 
     @staticmethod
     def _find_closest_log(video_path: str, log_dir: str) -> str | None:

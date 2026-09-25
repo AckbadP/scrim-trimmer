@@ -385,6 +385,56 @@ class TestDetectT0:
         finally:
             os.unlink(path)
 
+    # -- frozen/static recording -------------------------------------------
+
+    def test_raises_frozen_recording_error_when_ocr_text_repeats(self):
+        # Every sample OCRs to the same (long enough) text — as it would for
+        # a recording whose capture source stopped updating — and none of
+        # it matches the log → the frozen-recording message, not the
+        # generic "check your chat region" one.
+        path = self._write_detect_log()
+        try:
+            try:
+                self._run(
+                    path,
+                    "completely unrelated ocr output that is long enough to count",
+                    fps=1.0, total_frames=120, sample_interval=30,
+                )
+                assert False, "Expected RuntimeError"
+            except RuntimeError as exc:
+                msg = str(exc)
+                assert "frozen" in msg
+                assert "same chat text" in msg
+        finally:
+            os.unlink(path)
+
+    def test_generic_error_when_ocr_text_varies_but_still_no_match(self):
+        # OCR text differs from sample to sample (a live, non-frozen
+        # recording) but none of it matches the log → must fall back to the
+        # generic message, not the frozen-recording one.
+        path = self._write_detect_log()
+        counter = [0]
+
+        def ocr_side_effect(_region):
+            counter[0] += 1
+            return f"completely unrelated ocr output number {counter[0]}"
+
+        cap_mock = _make_cap_mock(fps=1.0, total_frames=120)
+        blank = np.zeros((100, 100, 3), dtype=np.uint8)
+        try:
+            with mock.patch("log_matcher.cv2.VideoCapture", return_value=cap_mock), \
+                 mock.patch("log_matcher.crop_chat_region", return_value=blank), \
+                 mock.patch("log_matcher.run_ocr_on_region", side_effect=ocr_side_effect):
+                try:
+                    detect_t0([path], "fake.mp4", sample_interval=30)
+                    assert False, "Expected RuntimeError"
+                except RuntimeError as exc:
+                    msg = str(exc)
+                    assert "frozen" not in msg
+                    assert "Possible causes" in msg
+        finally:
+            os.unlink(path)
+
     # -- verbose output covers print branches (lines 114, 160, 197) ---------
 
     def test_verbose_mode(self, capsys):

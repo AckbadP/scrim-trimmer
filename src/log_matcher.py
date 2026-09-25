@@ -25,6 +25,7 @@ Strategy
 import re
 import sys
 import time
+from collections import Counter
 from typing import Dict, List, Optional
 
 import cv2
@@ -143,6 +144,13 @@ def detect_t0(
         # message prevents stale detections from forming false dense clusters.
         best_per_msg: Dict[str, int] = {}
         frames_sampled = 0
+        # Frequency of each sample's normalised OCR text, used only to detect
+        # a frozen/stale recording (the capture source stopped updating) when
+        # nothing else matches below. Raw pixel bytes aren't used for this —
+        # seek jitter and decode noise mean a genuinely static chat panel
+        # still yields a few distinct crops — but OCR text on top of that
+        # noise is stable, since it's already normalised down to characters.
+        ocr_text_counts: Counter = Counter()
         consecutive_failures = 0
         # Belt-and-suspenders against a bad duration estimate (e.g. probing
         # failed and the OpenCV frame count was still garbage): give up
@@ -175,6 +183,7 @@ def detect_t0(
             del frame
             ocr_text = run_ocr_on_region(region)
             norm_ocr = _normalize(ocr_text)
+            ocr_text_counts[norm_ocr] += 1
 
             for norm_msg, game_sec in unique_msgs.items():
                 if norm_msg in norm_ocr:
@@ -210,6 +219,31 @@ def detect_t0(
         cap.release()
 
     if not best_per_msg:
+        # A frozen/stale recording (the capture source stopped updating)
+        # shows the same chat text in almost every sample even though raw
+        # pixel bytes can still drift slightly from seek/decode noise —
+        # majority-vote on the normalised OCR text instead of hashing crops.
+        _FROZEN_MAJORITY_RATIO = 0.7
+        _FROZEN_MIN_TEXT_LEN = 30
+        top_text, top_count = (ocr_text_counts.most_common(1) or [("", 0)])[0]
+        if (
+            frames_sampled >= 3
+            and len(top_text) >= _FROZEN_MIN_TEXT_LEN
+            and top_count / frames_sampled >= _FROZEN_MAJORITY_RATIO
+        ):
+            raise RuntimeError(
+                f"Could not auto-detect t0: {top_count} of {frames_sampled} sampled "
+                "frames show the exact same chat text — the recording appears to be "
+                "frozen (the capture source stopped updating).\n"
+                "\n"
+                "Check that the recording plays back with a ticking in-game clock and "
+                "new chat messages arriving. If it does, the chat region may be over "
+                "a part of the screen that happens to stay static — adjust it in the "
+                "GUI or with --chat-region.\n"
+                "\n"
+                "Alternatively, provide --t0 manually (EVE game time in seconds since "
+                "midnight UTC at video second 0)."
+            )
         x1, y1, x2, y2 = chat_region
         raise RuntimeError(
             f"Could not auto-detect t0: none of the {len(unique_msgs)} unique chat log "
@@ -219,8 +253,8 @@ def detect_t0(
             f"  - Chat region ({x1:.2f}, {y1:.2f}, {x2:.2f}, {y2:.2f}) does not cover "
             "the chat box — adjust it in the GUI or with --chat-region.\n"
             "  - The chat log does not overlap with the video (wrong session or date).\n"
+            "  - You provided the wrong log file.\n"
             "  - Chat text is too small, obscured, or uses a non-default font scale "
-            "  - You provided the wrong log file"
             "that OCR cannot read.\n"
             "\n"
             "Alternatively, provide --t0 manually (EVE game time in seconds since "

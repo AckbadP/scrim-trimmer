@@ -19,6 +19,7 @@ from frame_extractor import (
     check_source_video,
     extract_frames,
     get_video_duration,
+    is_growing,
     probe_duration,
 )
 
@@ -145,6 +146,29 @@ class TestProbeDuration:
 # ---------------------------------------------------------------------------
 # check_source_video
 # ---------------------------------------------------------------------------
+
+class TestIsGrowing:
+    def test_false_when_size_unchanged(self, monkeypatch, tmp_path):
+        video = tmp_path / "finished.mp4"
+        video.write_bytes(b"x" * 100)
+        monkeypatch.setattr("frame_extractor.time.sleep", lambda s: None)
+        assert is_growing(str(video), wait=0.01) is False
+
+    def test_true_when_size_increases(self, monkeypatch, tmp_path):
+        video = tmp_path / "recording.mp4"
+        video.write_bytes(b"x" * 100)
+        sizes = iter([100, 250])
+        monkeypatch.setattr("frame_extractor.os.path.getsize", lambda p: next(sizes))
+        monkeypatch.setattr("frame_extractor.time.sleep", lambda s: None)
+        assert is_growing(str(video), wait=0.01) is True
+
+    def test_none_on_missing_file(self, monkeypatch):
+        monkeypatch.setattr(
+            "frame_extractor.os.path.getsize",
+            MagicMock(side_effect=OSError("no such file")),
+        )
+        assert is_growing("/no/such/file.mp4") is None
+
 
 class TestCheckSourceVideo:
     def test_none_when_stable_and_probeable(self, monkeypatch, tmp_path):
