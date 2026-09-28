@@ -66,6 +66,10 @@ _DEFAULTS = {
     "youtube_upload": False,  # auto-upload final video to YouTube as unlisted after processing
     "tournament_match": False,  # detect tournament match boundaries instead of CD/WF commands
     "detect_countdown": True,  # treat a bare descending countdown as an implicit CD
+    "buffer_start": 0,  # seconds added to each clip's start (negative = earlier), normal mode
+    "buffer_end": 0,  # seconds added to each clip's end (negative = earlier), normal mode
+    "tournament_buffer_start": 0,  # same, tournament mode
+    "tournament_buffer_end": 10,  # same, tournament mode (matches prior hardcoded +10s tail)
     "window_geometry": "",  # last window geometry string, e.g. "900x700+100+50"
 }
 

@@ -122,6 +122,14 @@ class App(TkinterDnD.Tk):
         self.tournament_match_var.trace_add("write", self._save_config)
         self.detect_countdown_var = tk.BooleanVar(value=bool(_conf.get("detect_countdown", True)))
         self.detect_countdown_var.trace_add("write", self._save_config)
+        self.buffer_start_var = tk.IntVar(value=_conf.get("buffer_start", 0))
+        self.buffer_start_var.trace_add("write", self._save_config)
+        self.buffer_end_var = tk.IntVar(value=_conf.get("buffer_end", 0))
+        self.buffer_end_var.trace_add("write", self._save_config)
+        self.tournament_buffer_start_var = tk.IntVar(value=_conf.get("tournament_buffer_start", 0))
+        self.tournament_buffer_start_var.trace_add("write", self._save_config)
+        self.tournament_buffer_end_var = tk.IntVar(value=_conf.get("tournament_buffer_end", 10))
+        self.tournament_buffer_end_var.trace_add("write", self._save_config)
         self.youtube_upload_var = tk.BooleanVar(value=bool(_conf.get("youtube_upload", False)))
         self.youtube_upload_var.trace_add("write", self._save_config)
         self.youtube_title_var = tk.StringVar(value=cfg.default_youtube_title())
@@ -300,11 +308,37 @@ class App(TkinterDnD.Tk):
         _defaults_row(2, "Output directory", self.default_output_dir_var, self._browse_default_output_dir)
         _defaults_row(3, "Chapters file dir", self.default_chapters_dir_var, self._browse_default_chapters_dir)
 
+        # clip buffers sub-section
+        buffers_lf = ttk.LabelFrame(adv_tab, text="Clip Buffers (seconds)", padding=6)
+        buffers_lf.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(0, 8))
+
+        ttk.Label(buffers_lf, text="").grid(row=0, column=0)
+        ttk.Label(buffers_lf, text="Start").grid(row=0, column=1, padx=(4, 12))
+        ttk.Label(buffers_lf, text="End").grid(row=0, column=2, padx=(4, 0))
+
+        def _buffer_spinbox(parent, var):
+            sb = ttk.Spinbox(parent, from_=-300, to=300, textvariable=var,
+                              width=5, command=self._save_config)
+            sb.bind("<FocusOut>", lambda _: self._save_config())
+            return sb
+
+        ttk.Label(buffers_lf, text="Normal").grid(row=1, column=0, sticky=tk.W, padx=(0, 8), pady=2)
+        _buffer_spinbox(buffers_lf, self.buffer_start_var).grid(row=1, column=1, padx=(4, 12), pady=2)
+        _buffer_spinbox(buffers_lf, self.buffer_end_var).grid(row=1, column=2, padx=(4, 0), pady=2)
+
+        ttk.Label(buffers_lf, text="Tournament").grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=2)
+        _buffer_spinbox(buffers_lf, self.tournament_buffer_start_var).grid(row=2, column=1, padx=(4, 12), pady=2)
+        _buffer_spinbox(buffers_lf, self.tournament_buffer_end_var).grid(row=2, column=2, padx=(4, 0), pady=2)
+
+        ttk.Label(buffers_lf, text="Added to each clip's start/end before extraction. Negative = earlier.",
+                  foreground="#888", font=("TkDefaultFont", 8)).grid(
+            row=3, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
+
         # t0
         ttk.Label(adv_tab, text="Recording start time (UTC)").grid(
-            row=1, column=0, sticky=tk.W, pady=(4, 0), padx=(0, 8))
+            row=2, column=0, sticky=tk.W, pady=(4, 0), padx=(0, 8))
         t0_entry = ttk.Entry(adv_tab, textvariable=self.t0_var, width=14)
-        t0_entry.grid(row=1, column=1, sticky=tk.W, pady=(4, 0))
+        t0_entry.grid(row=2, column=1, sticky=tk.W, pady=(4, 0))
         t0_entry.insert(0, "HH:MM:SS (optional)")
         t0_entry.bind("<FocusIn>", lambda e: t0_entry.delete(0, tk.END)
                       if self.t0_var.get() == "HH:MM:SS (optional)" else None)
@@ -313,21 +347,21 @@ class App(TkinterDnD.Tk):
         ttk.Label(adv_tab, text="EVE game clock (UTC) when the video started — used to sync\n"
                                 "chat log timestamps. Auto-detected if left blank.",
                   foreground="#888", font=("TkDefaultFont", 8)).grid(
-            row=2, column=0, columnspan=2, sticky=tk.W, pady=(0, 4), padx=(0, 8))
+            row=3, column=0, columnspan=2, sticky=tk.W, pady=(0, 4), padx=(0, 8))
 
         # threads
-        ttk.Label(adv_tab, text="Threads").grid(row=3, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Label(adv_tab, text="Threads").grid(row=4, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         threads_frame = ttk.Frame(adv_tab)
-        threads_frame.grid(row=3, column=1, sticky=tk.W, pady=2)
+        threads_frame.grid(row=4, column=1, sticky=tk.W, pady=2)
         ttk.Spinbox(threads_frame, from_=1, to=64, textvariable=self.threads_var,
                     width=5, command=self._save_config).grid(row=0, column=0)
         ttk.Label(threads_frame, text=f"(CPU cores: {os.cpu_count() or '?'})",
                   foreground="#888").grid(row=0, column=1, padx=(6, 0))
 
         # ram cap
-        ttk.Label(adv_tab, text="RAM cap (GB)").grid(row=4, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Label(adv_tab, text="RAM cap (GB)").grid(row=5, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ram_frame = ttk.Frame(adv_tab)
-        ram_frame.grid(row=4, column=1, sticky=tk.W, pady=2)
+        ram_frame.grid(row=5, column=1, sticky=tk.W, pady=2)
         ttk.Spinbox(ram_frame, from_=1, to=256, textvariable=self.ram_cap_var,
                     width=5, command=self._save_config).grid(row=0, column=0)
         _total_ram = round(psutil.virtual_memory().total / 1024 ** 3)
@@ -335,59 +369,59 @@ class App(TkinterDnD.Tk):
                   foreground="#888").grid(row=0, column=1, padx=(6, 0))
 
         # verbose
-        ttk.Label(adv_tab, text="verbose").grid(row=5, column=0, sticky=tk.W, pady=2, padx=(0, 8))
-        ttk.Checkbutton(adv_tab, variable=self.verbose_var).grid(row=5, column=1, sticky=tk.W, pady=2)
+        ttk.Label(adv_tab, text="verbose").grid(row=6, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+        ttk.Checkbutton(adv_tab, variable=self.verbose_var).grid(row=6, column=1, sticky=tk.W, pady=2)
 
         # run without ffmpeg
         ttk.Label(adv_tab, text="Run without ffmpeg").grid(
-            row=6, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=7, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(
             adv_tab, variable=self.run_without_ffmpeg_var,
             command=self._on_run_without_ffmpeg_toggle,
-        ).grid(row=6, column=1, sticky=tk.W, pady=2)
+        ).grid(row=7, column=1, sticky=tk.W, pady=2)
 
         # force OCR pipeline
         ttk.Label(adv_tab, text="Force OCR pipeline").grid(
-            row=7, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=8, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.force_ocr_var).grid(
-            row=7, column=1, sticky=tk.W, pady=2)
+            row=8, column=1, sticky=tk.W, pady=2)
 
         # bare-countdown detection
         ttk.Label(adv_tab, text="Detect bare countdowns as CD").grid(
-            row=8, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=9, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.detect_countdown_var).grid(
-            row=8, column=1, sticky=tk.W, pady=2)
+            row=9, column=1, sticky=tk.W, pady=2)
         ttk.Label(adv_tab, text="Treat a bare descending countdown ('10', '9', '8', ...) as an\n"
                                 "implicit CD when no 'CD' was typed. In OCR mode this can produce\n"
                                 "spurious clip starts from misread digits.",
                   foreground="#888", font=("TkDefaultFont", 8)).grid(
-            row=9, column=0, columnspan=2, sticky=tk.W, pady=(0, 4), padx=(0, 8))
+            row=10, column=0, columnspan=2, sticky=tk.W, pady=(0, 4), padx=(0, 8))
 
         # chapter timestamps popup
         ttk.Label(adv_tab, text="Show timestamps popup").grid(
-            row=10, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=11, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.show_chapters_popup_var).grid(
-            row=10, column=1, sticky=tk.W, pady=2)
+            row=11, column=1, sticky=tk.W, pady=2)
 
         # close on complete
         ttk.Label(adv_tab, text="Close when done").grid(
-            row=11, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=12, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.close_on_complete_var).grid(
-            row=11, column=1, sticky=tk.W, pady=2)
+            row=12, column=1, sticky=tk.W, pady=2)
 
         # debug output popup
         ttk.Label(adv_tab, text="Show debug output").grid(
-            row=12, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=13, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.show_debug_popup_var).grid(
-            row=12, column=1, sticky=tk.W, pady=2)
+            row=13, column=1, sticky=tk.W, pady=2)
 
         # YouTube upload
         ttk.Separator(adv_tab, orient=tk.HORIZONTAL).grid(
-            row=13, column=0, columnspan=2, sticky=tk.EW, pady=(8, 4))
+            row=14, column=0, columnspan=2, sticky=tk.EW, pady=(8, 4))
         ttk.Label(adv_tab, text="Upload to YouTube").grid(
-            row=14, column=0, sticky=tk.W, pady=2, padx=(0, 8))
+            row=15, column=0, sticky=tk.W, pady=2, padx=(0, 8))
         ttk.Checkbutton(adv_tab, variable=self.youtube_upload_var).grid(
-            row=14, column=1, sticky=tk.W, pady=2)
+            row=15, column=1, sticky=tk.W, pady=2)
 
         _last_nb_content_height = [None]
 
@@ -777,6 +811,10 @@ class App(TkinterDnD.Tk):
             youtube_title=self.youtube_title_var.get().strip(),
             tournament_match=bool(self.tournament_match_var.get()),
             detect_countdown=bool(self.detect_countdown_var.get()),
+            buffer_start=self._safe_int(self.buffer_start_var, 0),
+            buffer_end=self._safe_int(self.buffer_end_var, 0),
+            tournament_buffer_start=self._safe_int(self.tournament_buffer_start_var, 0),
+            tournament_buffer_end=self._safe_int(self.tournament_buffer_end_var, 10),
         )
 
         self._launch_worker(args)
@@ -1177,6 +1215,14 @@ class App(TkinterDnD.Tk):
             self.after_cancel(self._geom_save_after)
         self._geom_save_after = self.after(500, self._save_config)
 
+    @staticmethod
+    def _safe_int(var: "tk.IntVar", default: int = 0) -> int:
+        """var.get() but tolerant of a mid-edit Spinbox value like '-' or ''."""
+        try:
+            return var.get()
+        except tk.TclError:
+            return default
+
     def _save_config(self, *_):
         self._geom_save_after = None
         cfg.save_config({
@@ -1193,6 +1239,10 @@ class App(TkinterDnD.Tk):
             "youtube_upload": bool(self.youtube_upload_var.get()),
             "tournament_match": bool(self.tournament_match_var.get()),
             "detect_countdown": bool(self.detect_countdown_var.get()),
+            "buffer_start": self._safe_int(self.buffer_start_var, 0),
+            "buffer_end": self._safe_int(self.buffer_end_var, 0),
+            "tournament_buffer_start": self._safe_int(self.tournament_buffer_start_var, 0),
+            "tournament_buffer_end": self._safe_int(self.tournament_buffer_end_var, 10),
             "window_geometry": self.winfo_geometry(),
         })
 

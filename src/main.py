@@ -74,6 +74,45 @@ def _warn_orphans(
         print(f"  {len(orphan_wfs)} round(s) had no CD/countdown and were skipped")
 
 
+def apply_buffers(
+    pairs: List[Tuple[int, int]],
+    start_buf: int,
+    end_buf: int,
+    duration: int,
+) -> List[Tuple[int, int]]:
+    """
+    Shift each (start, end) pair by the given buffers, clamped to
+    [0, duration]. A negative buffer moves the edge earlier; positive
+    moves it later. Pairs that collapse (end <= start) after clamping
+    are dropped.
+    """
+    result = []
+    dropped = 0
+    for start, end in pairs:
+        new_start = min(max(start + start_buf, 0), duration)
+        new_end = min(max(end + end_buf, 0), duration)
+        if new_end <= new_start:
+            dropped += 1
+            continue
+        result.append((new_start, new_end))
+    if dropped:
+        print(f"  Warning: {dropped} clip(s) collapsed after applying buffers and were skipped", file=sys.stderr)
+    return result
+
+
+def _buffers_for(args) -> Tuple[int, int]:
+    """Return (start_buf, end_buf) for the current mode (normal vs tournament)."""
+    if getattr(args, "tournament_match", False):
+        return (
+            getattr(args, "tournament_buffer_start", 0),
+            getattr(args, "tournament_buffer_end", 10),
+        )
+    return (
+        getattr(args, "buffer_start", 0),
+        getattr(args, "buffer_end", 0),
+    )
+
+
 def _find_windows_tool(name: str) -> "str | None":
     """
     Probe common Windows install directories for an executable not in PATH.
@@ -218,6 +257,38 @@ def parse_args():
             "Start: 'EVE System > 30 seconds until match start...'. "
             "End: 'EVE System > Match completed!'."
         ),
+    )
+    parser.add_argument(
+        "--buffer-start",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        dest="buffer_start",
+        help="Seconds added to each clip's start in normal mode (negative = earlier; default: 0)",
+    )
+    parser.add_argument(
+        "--buffer-end",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        dest="buffer_end",
+        help="Seconds added to each clip's end in normal mode (negative = earlier; default: 0)",
+    )
+    parser.add_argument(
+        "--tournament-buffer-start",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        dest="tournament_buffer_start",
+        help="Seconds added to each clip's start in tournament mode (negative = earlier; default: 0)",
+    )
+    parser.add_argument(
+        "--tournament-buffer-end",
+        type=int,
+        default=10,
+        metavar="SECONDS",
+        dest="tournament_buffer_end",
+        help="Seconds added to each clip's end in tournament mode (negative = earlier; default: 10)",
     )
     parser.add_argument(
         "--no-detect-countdown",
@@ -427,8 +498,6 @@ def run(args) -> None:
         cd_times, wf_times = parse_chat_logs(args.chat_logs, t0_sec, duration,
                                                tournament_mode=_tourn,
                                                detect_countdown=getattr(args, "detect_countdown", True))
-        if _tourn:
-            wf_times = [min(t + 10, duration) for t in wf_times]
         print(f"  Found {len(cd_times)} CD(s) at: {cd_times}")
         print(f"  Found {len(wf_times)} WF(s) at: {wf_times}")
 
@@ -436,6 +505,11 @@ def run(args) -> None:
         print(f"  Paired {len(pairs)} clip(s): {pairs}")
 
         _warn_orphans(cd_times, wf_times, pairs)
+
+        start_buf, end_buf = _buffers_for(args)
+        if start_buf or end_buf:
+            pairs = apply_buffers(pairs, start_buf, end_buf, duration)
+            print(f"  Applied buffers (start={start_buf:+d}s, end={end_buf:+d}s): {pairs}")
 
         if not pairs:
             print("\nNo CD→WF pairs found. Nothing to clip.", file=sys.stderr)
@@ -577,8 +651,6 @@ def run(args) -> None:
     cd_times, wf_times = analyze_frames(frame_texts, verbose=args.verbose,
                                          tournament_mode=_tourn,
                                          detect_countdown=_detect_countdown)
-    if _tourn:
-        wf_times = [min(t + 10, duration) for t in wf_times]
     print(f"  Found {len(cd_times)} CD(s) at: {cd_times}")
     print(f"  Found {len(wf_times)} WF(s) at: {wf_times}")
 
@@ -586,6 +658,11 @@ def run(args) -> None:
     print(f"  Paired {len(pairs)} clip(s): {pairs}")
 
     _warn_orphans(cd_times, wf_times, pairs)
+
+    start_buf, end_buf = _buffers_for(args)
+    if start_buf or end_buf:
+        pairs = apply_buffers(pairs, start_buf, end_buf, duration)
+        print(f"  Applied buffers (start={start_buf:+d}s, end={end_buf:+d}s): {pairs}")
 
     if not pairs:
         print("\nNo CD→WF pairs found. Nothing to clip.", file=sys.stderr)

@@ -95,6 +95,8 @@ The thumbnail is resizable: drag the window edges to make it larger for more pre
 | Field | Default | Description |
 |---|---|---|
 | **t0** | *(auto)* | EVE game time (UTC) at video second 0 — `HH:MM:SS`. Required when using a chat log if it cannot be auto-detected from the video filename. |
+| **Clip buffers (Normal start/end)** | 0 / 0 | Seconds added to each clip's start/end when detecting CD/WF commands (normal mode). Negative values move the edge earlier. |
+| **Clip buffers (Tournament start/end)** | 0 / 10 | Seconds added to each clip's start/end when using Tournament Match mode. The default +10s end buffer preserves the trailing "Match completed!" text on screen. |
 | **Threads** | CPU count | Number of parallel threads used for frame extraction and OCR. The hint shows the number of logical cores available on this machine. |
 | **RAM cap (GB)** | 10 | Maximum gigabytes of decoded frames held in memory at once. Reduce if the process is killed by the OS. The hint shows total physical RAM available on this machine. |
 | **Verbose** | off | Print OCR text and detection info per frame to the console. |
@@ -131,6 +133,10 @@ python src/main.py <video.mp4>
 | `--chat-region X1 Y1 X2 Y2` | `0.0 0.35 0.15 1.0` | Chat window region as fractions of frame dimensions (left, top, right, bottom) |
 | `--chat-log` | *(none)* | EVE chat log `.txt` to use instead of OCR (repeatable for multiple files) |
 | `--t0` | *(auto)* | EVE game time (UTC) at video second 0 — `HH:MM:SS`; required with `--chat-log` if it cannot be auto-detected |
+| `--buffer-start SECONDS` | `0` | Seconds added to each clip's start in normal mode (negative = earlier) |
+| `--buffer-end SECONDS` | `0` | Seconds added to each clip's end in normal mode (negative = earlier) |
+| `--tournament-buffer-start SECONDS` | `0` | Seconds added to each clip's start in `--tournament-match` mode (negative = earlier) |
+| `--tournament-buffer-end SECONDS` | `10` | Seconds added to each clip's end in `--tournament-match` mode (negative = earlier) |
 | `--threads N` | CPU count | Number of parallel OCR worker threads |
 | `--ram-cap-gb GB` | `10` | Maximum GB of decoded frames held in memory at once; reduce if the process is killed by the OS |
 | `--chapters-dir DIR` | *(output dir)* | Directory to write the YouTube chapter timestamps `.txt` file |
